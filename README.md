@@ -269,6 +269,18 @@ GET /view/:device/:label?token=...&expression=%24%5B0%5D&expression=%24%5B1%5D&e
 
 readonly pageではブラウザ側でもJSONataを評価するため、定義済みextractorに加えて、画面上で一時的な抽出式を試せます。定義済みextractorとテンポラリ式は同時に表示できます。
 
+抽出後の数値系列には、ブラウザ側で一時的な周波数バンド分解を適用できます。`frequency bands` を有効にし、`time constants` に `2s, 60s, 3600s` のような任意個のEMA時定数を指定すると、N個の時定数からN+1個のバンドを生成します。各バンドは隣り合うローパスの差分で、最後のバンドは最も長い時定数のローパス成分です。URLで初期状態を指定する場合:
+
+```text
+GET /view/:device/:label?token=...&extractor=raw-x&bands=1&bandConstants=2s%2C60s%2C3600s
+```
+
+元系列も併記する場合:
+
+```text
+GET /view/:device/:label?token=...&extractor=raw-x&bands=1&bandConstants=2s%2C60s%2C3600s&bandRaw=1
+```
+
 画面上部の `load from` / `load to` は、表示可能な最大データ範囲を指定します。`load to` は空欄にでき、空欄の場合は「現在まで」を対象にしてリアルタイムデータへ追従します。`load to` を指定した場合は過去範囲の閲覧となり、リアルタイム追従は行いません。グラフ下の範囲バーは、読み込んだ最大範囲の中で実際に表示する時間窓を調整します。
 
 readonly metadata:

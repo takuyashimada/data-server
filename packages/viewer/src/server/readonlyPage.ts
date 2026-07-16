@@ -93,6 +93,12 @@ export function readonlyPage(device: string, label: string, token: string): stri
         font-size: 12px;
         color: var(--muted);
       }
+      label.check {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 34px;
+      }
       select, input, textarea, button {
         height: 34px;
         border: 1px solid var(--panel-border);
@@ -129,6 +135,14 @@ export function readonlyPage(device: string, label: string, token: string): stri
       input[type="range"] {
         min-width: 180px;
         padding: 0;
+      }
+      input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        padding: 0;
+      }
+      input.short {
+        width: 170px;
       }
       .range-value {
         font-family: var(--mono);
@@ -275,6 +289,27 @@ export function readonlyPage(device: string, label: string, token: string): stri
         flex-wrap: wrap;
         margin-top: 8px;
       }
+      .legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: auto;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 500;
+      }
+      .legend-item:hover {
+        color: var(--text);
+      }
+      .legend-item.disabled {
+        opacity: 0.38;
+      }
+      .legend-item.disabled .swatch {
+        background: #9aa4b2 !important;
+      }
       .legend span {
         display: inline-flex;
         align-items: center;
@@ -318,6 +353,18 @@ export function readonlyPage(device: string, label: string, token: string): stri
         <label>
           load to
           <input id="to" type="datetime-local">
+        </label>
+        <label class="check">
+          <input id="bandsEnabled" type="checkbox">
+          frequency bands
+        </label>
+        <label>
+          time constants
+          <input id="bandConstants" class="short" type="text" value="2s, 60s, 3600s">
+        </label>
+        <label class="check">
+          <input id="bandIncludeRaw" type="checkbox">
+          raw
         </label>
         <button id="load" type="button">Load</button>
         <button id="live" class="secondary" type="button">Reconnect live</button>

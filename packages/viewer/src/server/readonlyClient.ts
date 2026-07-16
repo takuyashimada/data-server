@@ -6,6 +6,9 @@ export const readonlyClientScript = `(() => {
     expression: document.getElementById("expression"),
     from: document.getElementById("from"),
     to: document.getElementById("to"),
+    bandsEnabled: document.getElementById("bandsEnabled"),
+    bandConstants: document.getElementById("bandConstants"),
+    bandIncludeRaw: document.getElementById("bandIncludeRaw"),
     load: document.getElementById("load"),
     live: document.getElementById("live"),
     chart: document.getElementById("chart"),
@@ -29,6 +32,10 @@ export const readonlyClientScript = `(() => {
   let records = [];
   let evaluatedRows = [];
   let seriesPoints = [];
+  let currentBaseSeries = [];
+  let currentDisplaySeries = [];
+  let bandFilterStates = [];
+  const hiddenSeriesKeys = new Set();
   let viewStartMs = null;
   let viewEndMs = null;
   let dataStartMs = null;
@@ -54,7 +61,7 @@ export const readonlyClientScript = `(() => {
       .filter(Boolean);
   }
 
-  function activeSeries() {
+  function activeBaseSeries() {
     const configured = selectedExtractors().map((extractor, index) => ({
       key: "extractor:" + extractor.id,
       label: extractor.labelText,
@@ -75,6 +82,80 @@ export const readonlyClientScript = `(() => {
       }));
 
     return configured.concat(temporary);
+  }
+
+  function parseDurationSeconds(value) {
+    const match = String(value).trim().match(/^(\\d+(?:\\.\\d+)?)(ms|s|m|h)?$/i);
+    if (!match) return null;
+    const amount = Number(match[1]);
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    const unit = (match[2] ?? "s").toLowerCase();
+    if (unit === "ms") return amount / 1000;
+    if (unit === "m") return amount * 60;
+    if (unit === "h") return amount * 3600;
+    return amount;
+  }
+
+  function formatDurationSeconds(seconds) {
+    if (seconds < 1) return Math.round(seconds * 1000) + "ms";
+    if (seconds < 60) return seconds + "s";
+    if (seconds < 3600) return seconds / 60 + "m";
+    return seconds / 3600 + "h";
+  }
+
+  function activeBandConstants() {
+    if (!els.bandsEnabled.checked) return [];
+    return Array.from(new Set(
+      els.bandConstants.value
+        .split(/[\\s,]+/)
+        .map(parseDurationSeconds)
+        .filter((value) => value !== null)
+    )).sort((a, b) => a - b);
+  }
+
+  function bandLabel(index, constants) {
+    if (!constants.length) return "raw";
+    if (index === 0) return "< " + formatDurationSeconds(constants[0]);
+    if (index === constants.length) return "> " + formatDurationSeconds(constants[index - 1]);
+    return formatDurationSeconds(constants[index - 1]) + " - " + formatDurationSeconds(constants[index]);
+  }
+
+  function activeDisplaySeries(baseSeries = activeBaseSeries()) {
+    const constants = activeBandConstants();
+    if (!els.bandsEnabled.checked || !constants.length) {
+      return baseSeries.map((series, index) => ({
+        ...series,
+        mode: "raw",
+        sourceIndex: index,
+        color: colors[index % colors.length]
+      }));
+    }
+
+    const display = [];
+    baseSeries.forEach((series, sourceIndex) => {
+      if (els.bandIncludeRaw.checked) {
+        display.push({
+          ...series,
+          key: series.key + ":raw",
+          label: series.label + " raw",
+          mode: "raw",
+          sourceIndex,
+          color: colors[display.length % colors.length]
+        });
+      }
+      for (let bandIndex = 0; bandIndex <= constants.length; bandIndex++) {
+        display.push({
+          ...series,
+          key: series.key + ":band:" + bandIndex,
+          label: series.label + " " + bandLabel(bandIndex, constants),
+          mode: "band",
+          sourceIndex,
+          bandIndex,
+          color: colors[display.length % colors.length]
+        });
+      }
+    });
+    return display;
   }
 
   function unitSuffix(unit) {
@@ -151,6 +232,21 @@ export const readonlyClientScript = `(() => {
       .replaceAll("'", "&#39;");
   }
 
+  function pruneHiddenSeriesKeys(series) {
+    const keys = new Set(series.map((item) => item.key));
+    Array.from(hiddenSeriesKeys).forEach((key) => {
+      if (!keys.has(key)) hiddenSeriesKeys.delete(key);
+    });
+  }
+
+  function renderLegend(inputSeries) {
+    if (!inputSeries.length) return "";
+    return '<div class="legend">' + inputSeries.map((item) => {
+      const hidden = hiddenSeriesKeys.has(item.series.key);
+      return '<button type="button" class="legend-item' + (hidden ? ' disabled' : '') + '" data-series-key="' + escapeHtml(item.series.key) + '" title="' + escapeHtml(hidden ? "show " + item.series.label : "hide " + item.series.label) + '"><span class="swatch" style="background:' + escapeHtml(item.series.color) + '"></span><span>' + escapeHtml(item.series.label + unitSuffix(item.series.unit)) + '</span></button>';
+    }).join("") + "</div>";
+  }
+
   function flatten(value, prefix = "") {
     if (value === null || typeof value !== "object" || Array.isArray(value)) {
       return [[prefix || "$", value]];
@@ -167,37 +263,85 @@ export const readonlyClientScript = `(() => {
     return rows;
   }
 
-  async function evaluateRecord(record, series = activeSeries()) {
+  function createBandFilterStates(baseSeries = currentBaseSeries) {
+    const constants = activeBandConstants();
+    return baseSeries.map(() => constants.map((timeConstantSeconds) => ({
+      timeConstantSeconds,
+      value: undefined,
+      previousTimeMs: undefined
+    })));
+  }
+
+  function updateLowPass(state, input, timeMs) {
+    if (!Number.isFinite(input)) return null;
+    if (state.value === undefined || state.previousTimeMs === undefined) {
+      state.value = input;
+      state.previousTimeMs = timeMs;
+      return input;
+    }
+    const dt = Math.max(0, (timeMs - state.previousTimeMs) / 1000);
+    const alpha = 1 - Math.exp(-dt / state.timeConstantSeconds);
+    state.value += alpha * (input - state.value);
+    state.previousTimeMs = timeMs;
+    return state.value;
+  }
+
+  function displayValuesFromBase(baseValues, timeMs, displaySeries = currentDisplaySeries) {
+    const lowPassValues = bandFilterStates.map((states, sourceIndex) => {
+      const input = baseValues[sourceIndex];
+      return states.map((state) => updateLowPass(state, input, timeMs));
+    });
+
+    return displaySeries.map((series) => {
+      const raw = baseValues[series.sourceIndex];
+      if (series.mode === "raw") return raw;
+      if (typeof raw !== "number" || !Number.isFinite(raw)) return undefined;
+
+      const values = lowPassValues[series.sourceIndex] ?? [];
+      if (!values.length || values.some((value) => value === null)) return undefined;
+      if (series.bandIndex === 0) return raw - values[0];
+      if (series.bandIndex === values.length) return values[values.length - 1];
+      return values[series.bandIndex - 1] - values[series.bandIndex];
+    });
+  }
+
+  async function evaluateBaseRecord(record, series = currentBaseSeries) {
     if (!series.length) {
-      return { record, values: [], pointValues: [] };
+      return [];
     }
 
     const values = [];
-    const pointValues = [];
     for (const item of series) {
       const compiled = jsonata(item.expression);
       const value = await compiled.evaluate(record.data);
       values.push(value);
-      pointValues.push(typeof value === "number" && Number.isFinite(value) ? value : null);
     }
 
-    return { record, values, pointValues };
+    return values;
   }
 
   async function evaluateAll() {
-    const series = activeSeries();
+    currentBaseSeries = activeBaseSeries();
+    currentDisplaySeries = activeDisplaySeries(currentBaseSeries);
+    pruneHiddenSeriesKeys(currentDisplaySeries);
+    bandFilterStates = createBandFilterStates(currentBaseSeries);
     evaluatedRows = [];
-    seriesPoints = series.map((item) => ({ series: item, points: [] }));
-    for (let i = records.length - 1; i >= 0; i--) {
-      const row = await evaluateRecord(records[i], series);
-      evaluatedRows.push(row);
+    seriesPoints = currentDisplaySeries.map((item) => ({ series: item, points: [] }));
+
+    const chronologicalRows = [];
+    for (const record of records) {
+      const baseValues = await evaluateBaseRecord(record, currentBaseSeries);
+      const values = displayValuesFromBase(baseValues, recordTime(record), currentDisplaySeries);
+      const pointValues = values.map((value) => typeof value === "number" && Number.isFinite(value) ? value : null);
+      const row = { record, values, pointValues };
+      chronologicalRows.push(row);
       row.pointValues.forEach((value, index) => {
         if (value !== null) {
-          seriesPoints[index].points.push({ t: records[i].receivedAt, v: value });
+          seriesPoints[index].points.push({ t: record.receivedAt, v: value });
         }
       });
     }
-    seriesPoints.forEach((item) => item.points.reverse());
+    evaluatedRows = chronologicalRows.reverse();
   }
 
   function updateDataBounds() {
@@ -268,7 +412,7 @@ export const readonlyClientScript = `(() => {
   }
 
   function renderLatest(row) {
-    const series = activeSeries();
+    const series = currentDisplaySeries;
     if (!row) {
       els.latest.innerHTML = '<div class="message">No records.</div>';
       return;
@@ -289,7 +433,7 @@ export const readonlyClientScript = `(() => {
   }
 
   function renderRecords() {
-    const series = activeSeries();
+    const series = currentDisplaySeries;
     const unitLabels = Array.from(new Set(series.map((item) => item.unit).filter(Boolean)));
     els.recordsUnit.textContent = unitLabels.length === 1 ? "(" + unitLabels[0] + ")" : "";
 
@@ -313,6 +457,7 @@ export const readonlyClientScript = `(() => {
   }
 
   function drawChart(inputSeries = visibleSeriesPoints()) {
+    const shownSeries = inputSeries.filter((item) => !hiddenSeriesKeys.has(item.series.key));
     const canvas = els.chart;
     const rect = canvas.getBoundingClientRect();
     const scale = window.devicePixelRatio || 1;
@@ -332,7 +477,7 @@ export const readonlyClientScript = `(() => {
     ctx.lineWidth = 1;
     ctx.strokeRect(pad.left, pad.top, plotW, plotH);
 
-    const allPoints = inputSeries.flatMap((item) => item.points);
+    const allPoints = shownSeries.flatMap((item) => item.points);
     const minX = viewStartMs ?? (allPoints.length ? Math.min(...allPoints.map((p) => new Date(p.t).getTime())) : Date.now() - defaultWindowMs);
     const maxX = viewEndMs ?? (allPoints.length ? Math.max(...allPoints.map((p) => new Date(p.t).getTime())) : Date.now());
     const xSpan = maxX - minX || 1;
@@ -353,7 +498,8 @@ export const readonlyClientScript = `(() => {
     }
 
     if (!allPoints.length) {
-      els.chartMessage.textContent = "No numeric points for the selected range.";
+      const hiddenCount = inputSeries.filter((item) => hiddenSeriesKeys.has(item.series.key)).length;
+      els.chartMessage.innerHTML = escapeHtml("No numeric points for the selected range" + (hiddenCount ? " (" + hiddenCount + " hidden)" : "") + ".") + renderLegend(inputSeries);
       updateRangeEditor();
       return;
     }
@@ -381,7 +527,7 @@ export const readonlyClientScript = `(() => {
       ctx.fillText(fmt(value), pad.left - 8, y);
     }
 
-    inputSeries.forEach((item) => {
+    shownSeries.forEach((item) => {
       if (!item.points.length) return;
       ctx.strokeStyle = item.series.color;
       ctx.lineWidth = 2;
@@ -395,12 +541,11 @@ export const readonlyClientScript = `(() => {
       ctx.stroke();
     });
 
-    const unitLabels = Array.from(new Set(inputSeries.map((item) => item.series.unit).filter(Boolean)));
+    const unitLabels = Array.from(new Set(shownSeries.map((item) => item.series.unit).filter(Boolean)));
     const totalPoints = allPoints.length;
-    const seriesLabel = inputSeries.filter((item) => item.points.length).length + " series";
-    els.chartMessage.innerHTML = escapeHtml(totalPoints + " points / " + seriesLabel + (unitLabels.length === 1 ? " " + unitLabels[0] : "")) + '<div class="legend">' + inputSeries.map((item) => (
-      '<span><span class="swatch" style="background:' + escapeHtml(item.series.color) + '"></span>' + escapeHtml(item.series.label + unitSuffix(item.series.unit)) + '</span>'
-    )).join("") + "</div>";
+    const seriesLabel = shownSeries.filter((item) => item.points.length).length + " series";
+    const hiddenCount = inputSeries.length - shownSeries.length;
+    els.chartMessage.innerHTML = escapeHtml(totalPoints + " points / " + seriesLabel + (hiddenCount ? " / " + hiddenCount + " hidden" : "") + (unitLabels.length === 1 ? " " + unitLabels[0] : "")) + renderLegend(inputSeries);
     updateRangeEditor();
   }
 
@@ -475,6 +620,17 @@ export const readonlyClientScript = `(() => {
     if (requestedExpressions.length) {
       els.expression.value = requestedExpressions.map((value) => value.trim()).filter(Boolean).join("\\n");
     }
+
+    if (pageParams.get("bands") === "1") {
+      els.bandsEnabled.checked = true;
+    }
+    const requestedBandConstants = pageParams.get("bandConstants");
+    if (requestedBandConstants) {
+      els.bandConstants.value = requestedBandConstants;
+    }
+    if (pageParams.get("bandRaw") === "1") {
+      els.bandIncludeRaw.checked = true;
+    }
   }
 
   async function loadHistory(options = {}) {
@@ -497,9 +653,17 @@ export const readonlyClientScript = `(() => {
     params.set("token", state.token);
     params.delete("extractor");
     params.delete("expression");
+    params.delete("bands");
+    params.delete("bandConstants");
+    params.delete("bandRaw");
 
     selectedExtractors().forEach((extractor) => params.append("extractor", extractor.id));
     activeExpressions().forEach((expression) => params.append("expression", expression));
+    if (els.bandsEnabled.checked) {
+      params.set("bands", "1");
+      params.set("bandConstants", els.bandConstants.value);
+      if (els.bandIncludeRaw.checked) params.set("bandRaw", "1");
+    }
     history.replaceState(null, "", location.pathname + "?" + params.toString());
   }
 
@@ -517,11 +681,14 @@ export const readonlyClientScript = `(() => {
         return;
       }
       const oldEnd = dataEndMs;
-      const series = activeSeries();
+      const series = currentDisplaySeries;
       records.push(record);
       records = records.slice(-10000);
       try {
-        const row = await evaluateRecord(record, series);
+        const baseValues = await evaluateBaseRecord(record, currentBaseSeries);
+        const values = displayValuesFromBase(baseValues, recordTime(record), series);
+        const pointValues = values.map((value) => typeof value === "number" && Number.isFinite(value) ? value : null);
+        const row = { record, values, pointValues };
         evaluatedRows.unshift(row);
         evaluatedRows = evaluatedRows.slice(0, 10000);
         row.pointValues.forEach((value, index) => {
@@ -558,6 +725,24 @@ export const readonlyClientScript = `(() => {
     expressionTimer = setTimeout(() => {
       recomputeAndRender().catch(showError);
     }, 180);
+  }
+
+  function onBandInput() {
+    updateUrlState();
+    clearTimeout(expressionTimer);
+    expressionTimer = setTimeout(() => {
+      recomputeAndRender().catch(showError);
+    }, 180);
+  }
+
+  function onChartMessageClick(event) {
+    const button = event.target.closest?.("[data-series-key]");
+    if (!button) return;
+    const key = button.getAttribute("data-series-key");
+    if (!key) return;
+    if (hiddenSeriesKeys.has(key)) hiddenSeriesKeys.delete(key);
+    else hiddenSeriesKeys.add(key);
+    drawChart();
   }
 
   function installRangeEditor() {
@@ -629,6 +814,10 @@ export const readonlyClientScript = `(() => {
     els.to.addEventListener("change", () => loadHistory().catch(showError));
     els.extractor.addEventListener("change", () => onExtractorChange().catch(showError));
     els.expression.addEventListener("input", onExpressionInput);
+    els.bandsEnabled.addEventListener("change", onBandInput);
+    els.bandConstants.addEventListener("input", onBandInput);
+    els.bandIncludeRaw.addEventListener("change", onBandInput);
+    els.chartMessage.addEventListener("click", onChartMessageClick);
     els.load.addEventListener("click", () => loadHistory({ keepView: true }).catch(showError));
     els.live.addEventListener("click", () => {
       liveFollow = canLiveFollow();
