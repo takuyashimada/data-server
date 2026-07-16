@@ -1,4 +1,4 @@
-import { createLogger, defaultConfigDir, loadConfig, watchConfig } from "@iot-data-server/shared";
+import { createLogger, defaultConfigDir, loadReceiverConfig, watchConfig } from "@iot-data-server/shared";
 import { ConfigRef, disconnectUnauthorizedClients, reloadConfig } from "./configReload.js";
 import { createBroker } from "./broker/createBroker.js";
 import { JsonlWriter } from "./storage/jsonlWriter.js";
@@ -6,7 +6,7 @@ import { cleanupRetention } from "./storage/retention.js";
 
 async function main() {
   const configDir = defaultConfigDir();
-  const initialConfig = await loadConfig(configDir);
+  const initialConfig = await loadReceiverConfig(configDir);
   const configRef = new ConfigRef(initialConfig);
   const logger = createLogger(initialConfig).child({ process: "receiver" });
   const writer = new JsonlWriter(process.env.IOT_DATA_SERVER_DATA_DIR ?? initialConfig.storage.dataDir);
@@ -28,7 +28,7 @@ async function main() {
         logger.info({ disconnected }, "configuration reloaded");
       })
       .catch((error) => logger.error({ error }, "configuration reload failed"));
-  });
+  }, ["server.yaml", "devices.yaml"]);
 
   const shutdown = async () => {
     logger.info("receiver shutting down");

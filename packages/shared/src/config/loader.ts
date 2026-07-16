@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
-import { AppConfig, appConfigSchema } from "./schema.js";
+import { AppConfig, ReceiverConfig, appConfigSchema, receiverConfigSchema } from "./schema.js";
 
 export function findConfigDir(startDir: string): string | null {
   let current = path.resolve(startDir);
@@ -49,5 +49,17 @@ export async function loadConfig(configDir = defaultConfigDir()): Promise<AppCon
     ...(server as object),
     ...(devices as object),
     ...(extractors as object),
+  });
+}
+
+export async function loadReceiverConfig(configDir = defaultConfigDir()): Promise<ReceiverConfig> {
+  const [server, devices] = await Promise.all([
+    readYamlFile(path.join(configDir, "server.yaml")),
+    readYamlFile(path.join(configDir, "devices.yaml")),
+  ]);
+
+  return receiverConfigSchema.parse({
+    ...(server as object),
+    ...(devices as object),
   });
 }

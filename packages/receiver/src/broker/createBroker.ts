@@ -1,7 +1,6 @@
 import net from "node:net";
 import { createRequire } from "node:module";
 import {
-  AppConfig,
   canDevicePublish,
   createLogger,
   findDevice,
@@ -9,11 +8,12 @@ import {
   parseDataTopic,
   verifySecret,
   JsonValue,
+  ReceiverConfig,
 } from "@iot-data-server/shared";
 import { JsonlWriter } from "../storage/jsonlWriter.js";
 
 type MutableConfig = {
-  get(): AppConfig;
+  get(): ReceiverConfig;
 };
 
 const require = createRequire(import.meta.url);

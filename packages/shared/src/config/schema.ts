@@ -5,9 +5,6 @@ const optionalSecretSchema = z.object({
   token: z.string().min(1).optional(),
   tokenHash: z.string().min(1).optional(),
 });
-const requiredSecretSchema = optionalSecretSchema.refine((value) => value.token || value.tokenHash, {
-  message: "token or tokenHash is required",
-});
 
 export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   z.union([
@@ -76,8 +73,12 @@ export const labelConfigSchema = z.object({
 export const deviceConfigSchema = z.object({
   name: nameSchema,
   enabled: z.boolean().default(true),
+  token: z.string().min(1).optional(),
+  tokenHash: z.string().min(1).optional(),
   labels: z.array(labelConfigSchema).min(1),
-}).and(requiredSecretSchema);
+}).refine((value) => value.token || value.tokenHash, {
+  message: "token or tokenHash is required",
+});
 
 export const devicesConfigSchema = z.object({
   devices: z.array(deviceConfigSchema).default([]),
@@ -98,29 +99,36 @@ export const extractorsConfigSchema = z.object({
   extractors: z.array(extractorConfigSchema).default([]),
 });
 
-export const appConfigSchema = serverConfigSchema
-  .merge(devicesConfigSchema)
+function validateDevices(config: { devices: DeviceConfig[] }, ctx: z.RefinementCtx): void {
+  const devices = new Set<string>();
+  for (const device of config.devices) {
+    if (devices.has(device.name)) {
+      ctx.addIssue({ code: "custom", path: ["devices"], message: `duplicate device: ${device.name}` });
+    }
+    devices.add(device.name);
+
+    const labels = new Set<string>();
+    for (const label of device.labels) {
+      if (labels.has(label.name)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["devices", device.name, "labels"],
+          message: `duplicate label for ${device.name}: ${label.name}`,
+        });
+      }
+      labels.add(label.name);
+    }
+  }
+}
+
+const baseConfigSchema = serverConfigSchema.merge(devicesConfigSchema);
+
+export const receiverConfigSchema = baseConfigSchema.superRefine(validateDevices);
+
+export const appConfigSchema = baseConfigSchema
   .merge(extractorsConfigSchema)
   .superRefine((config, ctx) => {
-    const devices = new Set<string>();
-    for (const device of config.devices) {
-      if (devices.has(device.name)) {
-        ctx.addIssue({ code: "custom", path: ["devices"], message: `duplicate device: ${device.name}` });
-      }
-      devices.add(device.name);
-
-      const labels = new Set<string>();
-      for (const label of device.labels) {
-        if (labels.has(label.name)) {
-          ctx.addIssue({
-            code: "custom",
-            path: ["devices", device.name, "labels"],
-            message: `duplicate label for ${device.name}: ${label.name}`,
-          });
-        }
-        labels.add(label.name);
-      }
-    }
+    validateDevices(config, ctx);
 
     for (const extractor of config.extractors) {
       const device = config.devices.find((item) => item.name === extractor.device);
@@ -135,6 +143,7 @@ export const appConfigSchema = serverConfigSchema
     }
   });
 
+export type ReceiverConfig = z.infer<typeof receiverConfigSchema>;
 export type AppConfig = z.infer<typeof appConfigSchema>;
 export type DeviceConfig = z.infer<typeof deviceConfigSchema>;
 export type LabelConfig = z.infer<typeof labelConfigSchema>;
