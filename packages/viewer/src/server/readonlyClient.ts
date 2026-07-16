@@ -3,20 +3,48 @@ export const readonlyClientScript = `(() => {
   const els = {
     status: document.getElementById("status"),
     extractor: document.getElementById("extractor"),
+    expression: document.getElementById("expression"),
     from: document.getElementById("from"),
     to: document.getElementById("to"),
+    range: document.getElementById("range"),
+    rangeValue: document.getElementById("rangeValue"),
     load: document.getElementById("load"),
     live: document.getElementById("live"),
     chart: document.getElementById("chart"),
     chartMessage: document.getElementById("chartMessage"),
     latest: document.getElementById("latest"),
-    records: document.getElementById("records")
+    records: document.getElementById("records"),
+    recordsUnit: document.getElementById("recordsUnit")
   };
   let eventSource = null;
+  let metadata = null;
   let records = [];
+  let evaluatedRows = [];
+  let points = [];
 
+  const pageParams = new URLSearchParams(location.search);
   const apiBase = "/api/view/" + encodeURIComponent(state.device) + "/" + encodeURIComponent(state.label);
-  const tokenQuery = "token=" + encodeURIComponent(state.token);
+
+  function selectedExtractor() {
+    return metadata?.extractors.find((item) => item.id === els.extractor.value) ?? null;
+  }
+
+  function activeExpression() {
+    return els.expression.value.trim();
+  }
+
+  function activeUnit() {
+    const extractor = selectedExtractor();
+    if (extractor && activeExpression() === extractor.expression && extractor.unit) {
+      return extractor.unit;
+    }
+    return "";
+  }
+
+  function unitSuffix() {
+    const unit = activeUnit();
+    return unit ? " " + unit : "";
+  }
 
   function setStatus(text, kind) {
     els.status.className = "status" + (kind ? " " + kind : "");
@@ -32,10 +60,33 @@ export const readonlyClientScript = `(() => {
     return new Date(value);
   }
 
+  function updateRangeLabel() {
+    const minutes = Number(els.range.value);
+    els.rangeValue.textContent = minutes < 60 ? minutes + " min" : (minutes / 60).toFixed(minutes % 60 ? 1 : 0) + " h";
+  }
+
+  function applyRangeToInputs() {
+    const now = new Date();
+    const minutes = Number(els.range.value);
+    els.to.value = toLocalInputValue(now);
+    els.from.value = toLocalInputValue(new Date(now.getTime() - minutes * 60 * 1000));
+    updateRangeLabel();
+  }
+
   function fmt(value) {
     if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(4).replace(/0+$/, "").replace(/\\.$/, "");
     if (typeof value === "string") return value;
+    if (value === undefined) return "undefined";
     return JSON.stringify(value);
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
   }
 
   function flatten(value, prefix = "") {
@@ -54,29 +105,70 @@ export const readonlyClientScript = `(() => {
     return rows;
   }
 
-  function renderLatest(record) {
-    const entries = flatten(record.data);
+  async function evaluateRecord(record) {
+    const expression = activeExpression();
+    if (!expression) {
+      return { record, value: record.data, point: typeof record.data === "number" ? { t: record.receivedAt, v: record.data } : null };
+    }
+
+    const compiled = jsonata(expression);
+    const value = await compiled.evaluate(record.data);
+    return {
+      record,
+      value,
+      point: typeof value === "number" && Number.isFinite(value) ? { t: record.receivedAt, v: value } : null
+    };
+  }
+
+  async function evaluateAll() {
+    const newestFirst = records.slice().reverse();
+    evaluatedRows = [];
+    points = [];
+    for (const record of newestFirst) {
+      const row = await evaluateRecord(record);
+      evaluatedRows.push(row);
+      if (row.point) points.push(row.point);
+    }
+    points.reverse();
+  }
+
+  function renderLatest(row) {
+    if (!row) {
+      els.latest.innerHTML = '<div class="message">No records.</div>';
+      return;
+    }
+
+    if (activeExpression()) {
+      const label = selectedExtractor()?.labelText ?? "Temporary expression";
+      els.latest.innerHTML = '<div class="metric"><div class="name">' + escapeHtml(label) + '</div><div class="value">' + escapeHtml(fmt(row.value) + unitSuffix()) + '</div></div>';
+      return;
+    }
+
+    const entries = flatten(row.record.data);
     els.latest.innerHTML = entries.map(([name, value]) => (
       '<div class="metric"><div class="name">' + escapeHtml(name) + '</div><div class="value">' + escapeHtml(fmt(value)) + '</div></div>'
     )).join("");
   }
 
   function renderRecords() {
-    els.records.innerHTML = records.slice(0, 200).map((record) => (
-      "<tr><td>" + escapeHtml(record.receivedAt) + '</td><td class="mono">' + escapeHtml(JSON.stringify(record.data, null, 2)) + "</td></tr>"
-    )).join("");
+    const useExpression = Boolean(activeExpression());
+    els.recordsUnit.textContent = activeUnit() ? "(" + activeUnit() + ")" : "";
+    els.records.innerHTML = evaluatedRows.slice(0, 200).map((row) => {
+      const value = useExpression ? fmt(row.value) + unitSuffix() : JSON.stringify(row.record.data, null, 2);
+      return "<tr><td>" + escapeHtml(row.record.receivedAt) + '</td><td class="mono">' + escapeHtml(value) + "</td></tr>";
+    }).join("");
   }
 
-  function escapeHtml(value) {
-    return String(value)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#39;");
+  function visiblePoints() {
+    const from = els.from.value ? fromLocalInputValue(els.from.value).getTime() : -Infinity;
+    const to = els.to.value ? fromLocalInputValue(els.to.value).getTime() : Infinity;
+    return points.filter((point) => {
+      const t = new Date(point.t).getTime();
+      return t >= from && t <= to;
+    });
   }
 
-  function drawChart(points) {
+  function drawChart(inputPoints = visiblePoints()) {
     const canvas = els.chart;
     const rect = canvas.getBoundingClientRect();
     const scale = window.devicePixelRatio || 1;
@@ -88,7 +180,7 @@ export const readonlyClientScript = `(() => {
     const height = canvas.height / scale;
     ctx.clearRect(0, 0, width, height);
 
-    const pad = { left: 58, right: 16, top: 18, bottom: 36 };
+    const pad = { left: 64, right: 18, top: 18, bottom: 38 };
     const plotW = width - pad.left - pad.right;
     const plotH = height - pad.top - pad.bottom;
 
@@ -96,14 +188,14 @@ export const readonlyClientScript = `(() => {
     ctx.lineWidth = 1;
     ctx.strokeRect(pad.left, pad.top, plotW, plotH);
 
-    if (!points.length) {
+    if (!inputPoints.length) {
       els.chartMessage.textContent = "No numeric points for the selected range.";
       return;
     }
-    els.chartMessage.textContent = points.length + " points";
+    els.chartMessage.textContent = inputPoints.length + " points" + unitSuffix();
 
-    const xs = points.map((p) => new Date(p.t).getTime());
-    const ys = points.map((p) => p.v);
+    const xs = inputPoints.map((p) => new Date(p.t).getTime());
+    const ys = inputPoints.map((p) => p.v);
     const minX = Math.min(...xs);
     const maxX = Math.max(...xs);
     let minY = Math.min(...ys);
@@ -133,7 +225,7 @@ export const readonlyClientScript = `(() => {
     ctx.strokeStyle = "#0f766e";
     ctx.lineWidth = 2;
     ctx.beginPath();
-    points.forEach((point, index) => {
+    inputPoints.forEach((point, index) => {
       const x = pad.left + ((new Date(point.t).getTime() - minX) / xSpan) * plotW;
       const y = pad.top + (1 - ((point.v - minY) / ySpan)) * plotH;
       if (index === 0) ctx.moveTo(x, y);
@@ -142,69 +234,127 @@ export const readonlyClientScript = `(() => {
     ctx.stroke();
   }
 
+  function renderAll() {
+    renderLatest(evaluatedRows[0]);
+    renderRecords();
+    drawChart();
+  }
+
+  async function recomputeAndRender() {
+    await evaluateAll();
+    renderAll();
+  }
+
   async function getJson(url) {
     const res = await fetch(url);
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   }
 
-  async function loadMetadata() {
-    const metadata = await getJson(apiBase + "/metadata?" + tokenQuery);
-    els.extractor.innerHTML = '<option value="">raw records</option>' + metadata.extractors.map((item) => (
-      '<option value="' + escapeHtml(item.id) + '">' + escapeHtml(item.labelText + (item.unit ? " (" + item.unit + ")" : "")) + "</option>"
-    )).join("");
-  }
-
-  async function loadHistory() {
+  function historyParams() {
     const params = new URLSearchParams({ token: state.token });
     if (els.from.value) params.set("from", fromLocalInputValue(els.from.value).toISOString());
     if (els.to.value) params.set("to", fromLocalInputValue(els.to.value).toISOString());
-    if (els.extractor.value) params.set("extractor", els.extractor.value);
-    const history = await getJson(apiBase + "/history?" + params.toString());
+    return params;
+  }
 
-    if (history.points) {
-      drawChart(history.points);
-      return;
+  async function loadMetadata() {
+    metadata = await getJson(apiBase + "/metadata?token=" + encodeURIComponent(state.token));
+    els.extractor.innerHTML = '<option value="">temporary/raw</option>' + metadata.extractors.map((item) => (
+      '<option value="' + escapeHtml(item.id) + '">' + escapeHtml(item.labelText + (item.unit ? " (" + item.unit + ")" : "")) + "</option>"
+    )).join("");
+
+    const requestedExtractor = pageParams.get("extractor");
+    const requestedExpression = pageParams.get("expression");
+    if (requestedExtractor && metadata.extractors.some((item) => item.id === requestedExtractor)) {
+      els.extractor.value = requestedExtractor;
+      els.expression.value = selectedExtractor()?.expression ?? "";
+    } else if (requestedExpression) {
+      els.expression.value = requestedExpression;
     }
+  }
 
-    records = history.records.slice().reverse().concat(records).slice(0, 200);
-    renderRecords();
-    const numericPoints = history.records
-      .filter((record) => typeof record.data === "number")
-      .map((record) => ({ t: record.receivedAt, v: record.data }));
-    drawChart(numericPoints);
+  async function loadHistory() {
+    const history = await getJson(apiBase + "/history?" + historyParams().toString());
+    records = history.records ?? [];
+    await recomputeAndRender();
+  }
+
+  function updateUrlState() {
+    const params = new URLSearchParams(location.search);
+    params.set("token", state.token);
+    if (els.extractor.value) params.set("extractor", els.extractor.value);
+    else params.delete("extractor");
+
+    const extractor = selectedExtractor();
+    if (activeExpression() && (!extractor || activeExpression() !== extractor.expression)) {
+      params.set("expression", activeExpression());
+    } else {
+      params.delete("expression");
+    }
+    history.replaceState(null, "", location.pathname + "?" + params.toString());
   }
 
   function connectRealtime() {
     if (eventSource) eventSource.close();
     setStatus("connecting live", "");
-    eventSource = new EventSource(apiBase + "/realtime?" + tokenQuery);
+    eventSource = new EventSource(apiBase + "/realtime?token=" + encodeURIComponent(state.token));
     eventSource.onopen = () => setStatus("live connected", "connected");
     eventSource.onerror = () => setStatus("live disconnected", "error");
-    eventSource.onmessage = (event) => {
+    eventSource.onmessage = async (event) => {
       const record = JSON.parse(event.data);
-      records.unshift(record);
-      records = records.slice(0, 200);
-      renderLatest(record);
-      renderRecords();
+      records.push(record);
+      records = records.slice(-10000);
+      applyRangeToInputs();
+      try {
+        await recomputeAndRender();
+      } catch (error) {
+        showError(error);
+      }
     };
   }
 
+  async function onExtractorChange() {
+    const extractor = selectedExtractor();
+    els.expression.value = extractor?.expression ?? "";
+    updateUrlState();
+    await recomputeAndRender();
+  }
+
+  let expressionTimer = null;
+  function onExpressionInput() {
+    els.extractor.value = "";
+    updateUrlState();
+    clearTimeout(expressionTimer);
+    expressionTimer = setTimeout(() => {
+      recomputeAndRender().catch(showError);
+    }, 180);
+  }
+
   async function init() {
-    const now = new Date();
-    els.to.value = toLocalInputValue(now);
-    els.from.value = toLocalInputValue(new Date(now.getTime() - 60 * 60 * 1000));
-    els.load.addEventListener("click", () => loadHistory().catch((error) => {
-      els.chartMessage.innerHTML = '<span class="error-text">' + escapeHtml(error.message) + "</span>";
-    }));
+    applyRangeToInputs();
+    els.range.addEventListener("input", () => {
+      applyRangeToInputs();
+      drawChart();
+    });
+    els.range.addEventListener("change", () => loadHistory().catch(showError));
+    els.from.addEventListener("change", drawChart);
+    els.to.addEventListener("change", drawChart);
+    els.extractor.addEventListener("change", () => onExtractorChange().catch(showError));
+    els.expression.addEventListener("input", onExpressionInput);
+    els.load.addEventListener("click", () => loadHistory().catch(showError));
     els.live.addEventListener("click", connectRealtime);
     await loadMetadata();
     await loadHistory();
     connectRealtime();
   }
 
+  function showError(error) {
+    els.chartMessage.innerHTML = '<span class="error-text">' + escapeHtml(error.message) + "</span>";
+  }
+
   init().catch((error) => {
     setStatus("error", "error");
-    els.chartMessage.innerHTML = '<span class="error-text">' + escapeHtml(error.message) + "</span>";
+    showError(error);
   });
 })();`;

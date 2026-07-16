@@ -114,6 +114,15 @@ export function readonlyPage(device: string, label: string, token: string): stri
         color: var(--text);
         border-color: var(--panel-border);
       }
+      input[type="range"] {
+        min-width: 180px;
+        padding: 0;
+      }
+      .range-value {
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--text);
+      }
       .grid {
         display: grid;
         grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
@@ -194,6 +203,11 @@ export function readonlyPage(device: string, label: string, token: string): stri
         padding: 14px;
         color: var(--muted);
       }
+      .unit {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 500;
+      }
       .error-text { color: var(--danger); }
       @media (max-width: 860px) {
         header { align-items: flex-start; flex-direction: column; }
@@ -215,6 +229,10 @@ export function readonlyPage(device: string, label: string, token: string): stri
           <select id="extractor"></select>
         </label>
         <label>
+          expression
+          <input id="expression" type="text" placeholder="temperature">
+        </label>
+        <label>
           from
           <input id="from" type="datetime-local">
         </label>
@@ -224,6 +242,11 @@ export function readonlyPage(device: string, label: string, token: string): stri
         </label>
         <button id="load" type="button">Load</button>
         <button id="live" class="secondary" type="button">Reconnect live</button>
+        <label>
+          chart range
+          <input id="range" type="range" min="1" max="1440" step="1" value="60">
+        </label>
+        <div id="rangeValue" class="range-value">60 min</div>
       </div>
       <div class="grid">
         <section>
@@ -239,7 +262,7 @@ export function readonlyPage(device: string, label: string, token: string): stri
         </section>
       </div>
       <section>
-        <h2>Recent Records</h2>
+        <h2>Recent Records <span id="recordsUnit" class="unit"></span></h2>
         <div class="records">
           <table>
             <thead><tr><th style="width: 220px;">receivedAt</th><th>data</th></tr></thead>
@@ -255,6 +278,7 @@ export function readonlyPage(device: string, label: string, token: string): stri
         token: ${JSON.stringify(token)}
       };
     </script>
+    <script src="/assets/jsonata.min.js"></script>
     <script src="/assets/readonly-view.js"></script>
   </body>
 </html>`;

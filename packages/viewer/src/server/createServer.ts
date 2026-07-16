@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import Fastify from "fastify";
 import {
   AppConfig,
@@ -11,6 +13,9 @@ import { readRecords } from "../history/jsonlReader.js";
 import { extractPoints } from "../history/extractor.js";
 import { readonlyClientScript } from "./readonlyClient.js";
 import { readonlyPage } from "./readonlyPage.js";
+
+const require = createRequire(import.meta.url);
+const jsonataBrowserScript = readFileSync(require.resolve("jsonata/jsonata.min.js"), "utf8");
 
 type ConfigRef = {
   get(): AppConfig;
@@ -44,6 +49,12 @@ export function createServer(configRef: ConfigRef, subscriber: RealtimeSubscribe
     return reply
       .type("application/javascript; charset=utf-8")
       .send(readonlyClientScript);
+  });
+
+  app.get("/assets/jsonata.min.js", async (_request, reply) => {
+    return reply
+      .type("application/javascript; charset=utf-8")
+      .send(jsonataBrowserScript);
   });
 
   app.get<{

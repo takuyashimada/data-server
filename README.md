@@ -243,6 +243,20 @@ readonly page:
 GET /view/:device/:label?token=...
 ```
 
+定義済みextractorを初期選択する場合:
+
+```text
+GET /view/:device/:label?token=...&extractor=room-temperature
+```
+
+テンポラリなJSONata式を指定する場合:
+
+```text
+GET /view/:device/:label?token=...&expression=temperature%20*%201.8%20%2B%2032
+```
+
+readonly pageではブラウザ側でもJSONataを評価するため、定義済みextractorに加えて、画面上で一時的な抽出式を試せます。
+
 readonly metadata:
 
 ```text

@@ -56,6 +56,7 @@ describe("createServer readonly viewer", () => {
     expect(response.statusCode).toBe(200);
     expect(response.headers["content-type"]).toContain("text/html");
     expect(response.body).toContain("room-a-sensor / environment");
+    expect(response.body).toContain("/assets/jsonata.min.js");
     expect(response.body).toContain("/assets/readonly-view.js");
   });
 
@@ -83,5 +84,19 @@ describe("createServer readonly viewer", () => {
     expect(response.statusCode).toBe(200);
     expect(response.headers["content-type"]).toContain("application/javascript");
     expect(response.body).toContain("connectRealtime");
+  });
+
+  it("serves the browser JSONata runtime", async () => {
+    const app = createServer({
+      configDir: "/tmp/config",
+      get: () => config,
+    }, new EventEmitter() as never);
+
+    const response = await app.inject("/assets/jsonata.min.js");
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("application/javascript");
+    expect(response.body).toContain("jsonata");
   });
 });
