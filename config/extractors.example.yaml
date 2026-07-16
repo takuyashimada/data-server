@@ -1,0 +1,18 @@
+extractors:
+  - id: "room-temperature"
+    device: "room-a-sensor"
+    label: "environment"
+    labelText: "Temperature"
+    expression: "temperature"
+    valueType: "number"
+    unit: "degC"
+    enabled: true
+
+  - id: "room-humidity"
+    device: "room-a-sensor"
+    label: "environment"
+    labelText: "Humidity"
+    expression: "humidity"
+    valueType: "number"
+    unit: "%"
+    enabled: true

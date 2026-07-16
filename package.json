@@ -1,0 +1,24 @@
+{
+  "name": "iot-data-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc -b packages/shared packages/receiver packages/viewer",
+    "typecheck": "tsc -b --noEmit",
+    "dev:receiver": "npm run dev --workspace=@iot-data-server/receiver",
+    "dev:viewer": "npm run dev --workspace=@iot-data-server/viewer",
+    "start:receiver": "node packages/receiver/dist/main.js",
+    "start:viewer": "node packages/viewer/dist/main.js",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}

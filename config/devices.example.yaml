@@ -1,0 +1,14 @@
+devices:
+  - name: "room-a-sensor"
+    enabled: true
+    token: "device-token"
+    labels:
+      - name: "environment"
+        enabled: true
+        readonlyView:
+          enabled: true
+          token: "readonly-token"
+      - name: "power"
+        enabled: true
+        readonlyView:
+          enabled: false

@@ -1,0 +1,30 @@
+server:
+  logLevel: "info"
+
+mqtt:
+  host: "0.0.0.0"
+  port: 1883
+  tls:
+    enabled: false
+    port: 8883
+    keyFile: "./certs/server.key"
+    certFile: "./certs/server.crt"
+  maxPayloadBytes: 65536
+
+storage:
+  dataDir: "./data"
+  rotation: "daily"
+  dateMode: "utc"
+  retentionDays: 62
+
+viewer:
+  host: "0.0.0.0"
+  port: 3000
+  realtime:
+    mqtt:
+      url: "mqtt://127.0.0.1:1883"
+      username: "viewer"
+      password: "viewer-token"
+
+admin:
+  passwordHash: "$argon2id$..."

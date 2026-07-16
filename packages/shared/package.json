@@ -1,0 +1,19 @@
+{
+  "name": "@iot-data-server/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "argon2": "^0.43.0",
+    "chokidar": "^4.0.0",
+    "pino": "^9.0.0",
+    "yaml": "^2.7.0",
+    "zod": "^3.25.0"
+  }
+}
