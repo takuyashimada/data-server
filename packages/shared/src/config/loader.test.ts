@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { findConfigDir, loadConfig, loadReceiverConfig } from "./loader.js";
+import { findConfigDir, loadConfig, loadReceiverConfig, resolveDataDir } from "./loader.js";
 
 describe("findConfigDir", () => {
   it("finds the project config directory from a workspace package directory", async () => {
@@ -74,5 +74,19 @@ extractors:
       devices: [{ name: "room-a-sensor" }],
     });
     await expect(loadConfig(configDir)).rejects.toThrow(/unknown extractor target/);
+  });
+});
+
+describe("resolveDataDir", () => {
+  it("resolves relative dataDir from the project root beside config", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "iot-data-server-"));
+    const configDir = path.join(root, "config");
+
+    expect(resolveDataDir(configDir, "./data")).toBe(path.join(root, "data"));
+  });
+
+  it("keeps absolute dataDir as-is", () => {
+    expect(resolveDataDir("/project/config", "/var/lib/iot-data-server/data"))
+      .toBe("/var/lib/iot-data-server/data");
   });
 });

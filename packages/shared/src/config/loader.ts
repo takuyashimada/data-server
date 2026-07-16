@@ -33,6 +33,18 @@ export function defaultConfigDir(): string {
   return findConfigDir(startDir) ?? path.resolve(startDir, "config");
 }
 
+export function resolveDataDir(configDir: string, dataDir: string): string {
+  if (process.env.IOT_DATA_SERVER_DATA_DIR) {
+    return process.env.IOT_DATA_SERVER_DATA_DIR;
+  }
+
+  if (path.isAbsolute(dataDir)) {
+    return dataDir;
+  }
+
+  return path.resolve(configDir, "..", dataDir);
+}
+
 async function readYamlFile(filePath: string): Promise<unknown> {
   const text = await readFile(filePath, "utf8");
   return YAML.parse(text) ?? {};

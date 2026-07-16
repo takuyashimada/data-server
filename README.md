@@ -73,6 +73,8 @@ viewer:
 
 `maxClientIdLength` はMQTT client_idの最大長です。M5Stack/UIFlow2など、デバイス側が長いclient_idを自動生成する場合があるため、デフォルトでは128文字にしています。
 
+`storage.dataDir` に相対パスを指定した場合は、`config/` の親ディレクトリを基準に解決します。通常の開発環境では `./data` はプロジェクトroot直下の `data/` を指します。
+
 ### `devices.yaml`
 
 デバイス名、デバイストークン、有効なラベル、readonly view tokenを設定します。
@@ -186,6 +188,46 @@ data/devices/room-a-sensor/environment/2026-07-16.jsonl
 ```json
 {"receivedAt":"2026-07-16T09:51:31.961Z","device":"room-a-sensor","label":"environment","topic":"devices/room-a-sensor/data/environment","data":{"temperature":24.8,"humidity":61}}
 ```
+
+## receiverログ
+
+receiverはJSON形式のログを標準出力へ出します。
+
+起動成功:
+
+```json
+{"process":"receiver","host":"0.0.0.0","port":1883,"msg":"MQTT receiver started"}
+```
+
+設定ファイル再読み込み成功:
+
+```json
+{"process":"receiver","disconnected":0,"msg":"configuration reloaded"}
+```
+
+認証失敗:
+
+```json
+{"process":"receiver","clientId":"room-a-sensor","username":"unknown-device","msg":"MQTT authentication failed: unknown device"}
+```
+
+```json
+{"process":"receiver","clientId":"room-a-sensor","username":"room-a-sensor","msg":"MQTT authentication failed: invalid token"}
+```
+
+接続packetやprotocol段階での失敗:
+
+```json
+{"process":"receiver","clientId":"room-a-sensor","msg":"MQTT connection error"}
+```
+
+publish認可や接続後のclient error:
+
+```json
+{"process":"receiver","clientId":"room-a-sensor","msg":"MQTT client error"}
+```
+
+M5Stackなど外部デバイスから接続できない場合、receiverログに何も出なければ、MacのFirewall、ルータのゲストSSID、接続先IP、ポート到達性など、MQTT以前のネットワーク到達性を疑ってください。
 
 ## Viewer API
 

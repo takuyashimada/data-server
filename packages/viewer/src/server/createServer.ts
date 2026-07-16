@@ -3,6 +3,7 @@ import {
   AppConfig,
   createLogger,
   findEnabledLabel,
+  resolveDataDir,
   verifySecret,
 } from "@iot-data-server/shared";
 import { RealtimeSubscriber } from "../mqtt/subscriber.js";
@@ -11,6 +12,7 @@ import { extractPoints } from "../history/extractor.js";
 
 type ConfigRef = {
   get(): AppConfig;
+  configDir: string;
 };
 
 function tokenFromQuery(query: unknown): string {
@@ -69,7 +71,7 @@ export function createServer(configRef: ConfigRef, subscriber: RealtimeSubscribe
       return reply.code(400).send({ error: "invalid date range" });
     }
 
-    const dataDir = process.env.IOT_DATA_SERVER_DATA_DIR ?? config.storage.dataDir;
+    const dataDir = resolveDataDir(configRef.configDir, config.storage.dataDir);
     const records = await readRecords(dataDir, device, label, from, to);
     const extractor = config.extractors.find((item) =>
       item.enabled && item.device === device && item.label === label && item.id === request.query.extractor);

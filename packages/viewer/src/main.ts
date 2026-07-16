@@ -3,7 +3,7 @@ import { RealtimeSubscriber } from "./mqtt/subscriber.js";
 import { createServer } from "./server/createServer.js";
 
 class ConfigRef {
-  constructor(private value: AppConfig) {}
+  constructor(private value: AppConfig, readonly configDir: string) {}
 
   get(): AppConfig {
     return this.value;
@@ -17,7 +17,7 @@ class ConfigRef {
 async function main() {
   const configDir = defaultConfigDir();
   const initialConfig = await loadConfig(configDir);
-  const configRef = new ConfigRef(initialConfig);
+  const configRef = new ConfigRef(initialConfig, configDir);
   const logger = createLogger(initialConfig).child({ process: "viewer" });
   const subscriber = new RealtimeSubscriber();
   subscriber.start(initialConfig);

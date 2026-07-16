@@ -1,4 +1,4 @@
-import { createLogger, defaultConfigDir, loadReceiverConfig, watchConfig } from "@iot-data-server/shared";
+import { createLogger, defaultConfigDir, loadReceiverConfig, resolveDataDir, watchConfig } from "@iot-data-server/shared";
 import { ConfigRef, disconnectUnauthorizedClients, reloadConfig } from "./configReload.js";
 import { createBroker } from "./broker/createBroker.js";
 import { JsonlWriter } from "./storage/jsonlWriter.js";
@@ -9,14 +9,14 @@ async function main() {
   const initialConfig = await loadReceiverConfig(configDir);
   const configRef = new ConfigRef(initialConfig);
   const logger = createLogger(initialConfig).child({ process: "receiver" });
-  const writer = new JsonlWriter(process.env.IOT_DATA_SERVER_DATA_DIR ?? initialConfig.storage.dataDir);
+  const writer = new JsonlWriter(resolveDataDir(configDir, initialConfig.storage.dataDir));
   const broker = await createBroker(configRef, writer);
 
   await broker.listen();
 
   const retentionTimer = setInterval(() => {
     const config = configRef.get();
-    void cleanupRetention(process.env.IOT_DATA_SERVER_DATA_DIR ?? config.storage.dataDir, config.storage.retentionDays)
+    void cleanupRetention(resolveDataDir(configDir, config.storage.dataDir), config.storage.retentionDays)
       .then((removed) => logger.info({ removed }, "retention cleanup completed"))
       .catch((error) => logger.error({ error }, "retention cleanup failed"));
   }, 60 * 60 * 1000);
