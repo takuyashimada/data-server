@@ -24,6 +24,7 @@ async function main() {
   const closeWatcher = watchConfig(configDir, () => {
     void reloadConfig(configRef, configDir)
       .then((config) => {
+        broker.broker.maxClientsIdLength = config.mqtt.maxClientIdLength;
         const disconnected = disconnectUnauthorizedClients(broker.broker, config);
         logger.info({ disconnected }, "configuration reloaded");
       })

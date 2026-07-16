@@ -4,5 +4,6 @@ dist/
 .DS_Store
 data/*
 !data/.gitkeep
+packages/*/data/
 config/*.yaml
 !config/*.example.yaml

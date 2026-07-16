@@ -39,7 +39,8 @@ export const serverConfigSchema = z.object({
       certFile: z.string().default("./certs/server.crt"),
     }).default({ enabled: false, port: 8883, keyFile: "./certs/server.key", certFile: "./certs/server.crt" }),
     maxPayloadBytes: z.number().int().positive().default(65536),
-  }).default({ host: "0.0.0.0", port: 1883, maxPayloadBytes: 65536 }),
+    maxClientIdLength: z.number().int().positive().default(128),
+  }).default({ host: "0.0.0.0", port: 1883, maxPayloadBytes: 65536, maxClientIdLength: 128 }),
   storage: z.object({
     dataDir: z.string().default("./data"),
     rotation: z.literal("daily").default("daily"),

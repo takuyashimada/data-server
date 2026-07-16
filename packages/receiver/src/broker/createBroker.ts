@@ -18,14 +18,14 @@ type MutableConfig = {
 
 const require = createRequire(import.meta.url);
 const aedesModule = require("aedes") as any;
-const createAedesBroker = async (): Promise<any> => {
+const createAedesBroker = async (options: Record<string, unknown>): Promise<any> => {
   if (aedesModule.Aedes?.createBroker) {
-    return aedesModule.Aedes.createBroker();
+    return aedesModule.Aedes.createBroker(options);
   }
   if (typeof aedesModule === "function") {
-    return aedesModule();
+    return aedesModule(options);
   }
-  return (aedesModule.default ?? aedesModule.Aedes)();
+  return (aedesModule.default ?? aedesModule.Aedes)(options);
 };
 
 function payloadSize(payload: unknown): number {
@@ -44,8 +44,27 @@ function parsePayload(payload: unknown): JsonValue {
 }
 
 export async function createBroker(configRef: MutableConfig, writer: JsonlWriter) {
-  const broker = await createAedesBroker();
-  const logger = createLogger(configRef.get()).child({ process: "receiver" });
+  const initialConfig = configRef.get();
+  const broker = await createAedesBroker({
+    maxClientsIdLength: initialConfig.mqtt.maxClientIdLength,
+  });
+  const logger = createLogger(initialConfig).child({ process: "receiver" });
+
+  broker.on("clientError", (client: any, error: Error) => {
+    logger.warn({
+      clientId: client?.id,
+      username: client?.username,
+      error,
+    }, "MQTT client error");
+  });
+
+  broker.on("connectionError", (client: any, error: Error) => {
+    logger.warn({
+      clientId: client?.id,
+      username: client?.username,
+      error,
+    }, "MQTT connection error");
+  });
 
   broker.authenticate = async (client: any, username: string | undefined, password: Buffer | undefined, callback: any) => {
     const config = configRef.get();
@@ -60,6 +79,7 @@ export async function createBroker(configRef: MutableConfig, writer: JsonlWriter
 
     const device = findDevice(config, user);
     if (!device) {
+      logger.warn({ clientId: client?.id, username: user }, "MQTT authentication failed: unknown device");
       callback(null, false);
       return;
     }
@@ -68,6 +88,8 @@ export async function createBroker(configRef: MutableConfig, writer: JsonlWriter
     if (accepted) {
       client.role = "device";
       client.deviceName = device.name;
+    } else {
+      logger.warn({ clientId: client?.id, username: user }, "MQTT authentication failed: invalid token");
     }
     callback(null, accepted);
   };

@@ -52,6 +52,7 @@ mqtt:
   host: "0.0.0.0"
   port: 1883
   maxPayloadBytes: 65536
+  maxClientIdLength: 128
 
 storage:
   dataDir: "./data"
@@ -69,6 +70,8 @@ viewer:
 ```
 
 `viewer.realtime.mqtt.url` を変えると、ローカルのviewerから別ホストのMQTTブローカを購読できます。
+
+`maxClientIdLength` はMQTT client_idの最大長です。M5Stack/UIFlow2など、デバイス側が長いclient_idを自動生成する場合があるため、デフォルトでは128文字にしています。
 
 ### `devices.yaml`
 
