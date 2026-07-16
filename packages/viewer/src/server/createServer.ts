@@ -9,6 +9,8 @@ import {
 import { RealtimeSubscriber } from "../mqtt/subscriber.js";
 import { readRecords } from "../history/jsonlReader.js";
 import { extractPoints } from "../history/extractor.js";
+import { readonlyClientScript } from "./readonlyClient.js";
+import { readonlyPage } from "./readonlyPage.js";
 
 type ConfigRef = {
   get(): AppConfig;
@@ -37,6 +39,28 @@ export function createServer(configRef: ConfigRef, subscriber: RealtimeSubscribe
   });
 
   app.get("/health", async () => ({ ok: true }));
+
+  app.get("/assets/readonly-view.js", async (_request, reply) => {
+    return reply
+      .type("application/javascript; charset=utf-8")
+      .send(readonlyClientScript);
+  });
+
+  app.get<{
+    Params: { device: string; label: string };
+    Querystring: { token?: string };
+  }>("/view/:device/:label", async (request, reply) => {
+    const { device, label } = request.params;
+    const config = configRef.get();
+    const token = tokenFromQuery(request.query);
+    if (!(await canRead(config, device, label, token))) {
+      return reply.code(403).type("text/plain; charset=utf-8").send("forbidden");
+    }
+
+    return reply
+      .type("text/html; charset=utf-8")
+      .send(readonlyPage(device, label, token));
+  });
 
   app.get<{
     Params: { device: string; label: string };
@@ -100,6 +124,7 @@ export function createServer(configRef: ConfigRef, subscriber: RealtimeSubscribe
       "cache-control": "no-cache",
       connection: "keep-alive",
     });
+    reply.raw.write(": connected\n\n");
 
     const onRecord = (record: unknown) => {
       const typed = record as { device: string; label: string };

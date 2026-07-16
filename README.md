@@ -237,6 +237,12 @@ health check:
 GET /health
 ```
 
+readonly page:
+
+```text
+GET /view/:device/:label?token=...
+```
+
 readonly metadata:
 
 ```text
