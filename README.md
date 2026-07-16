@@ -249,13 +249,27 @@ GET /view/:device/:label?token=...
 GET /view/:device/:label?token=...&extractor=room-temperature
 ```
 
+複数の定義済みextractorを同時表示する場合:
+
+```text
+GET /view/:device/:label?token=...&extractor=raw-x&extractor=raw-y&extractor=raw-z
+```
+
 テンポラリなJSONata式を指定する場合:
 
 ```text
 GET /view/:device/:label?token=...&expression=temperature%20*%201.8%20%2B%2032
 ```
 
-readonly pageではブラウザ側でもJSONataを評価するため、定義済みextractorに加えて、画面上で一時的な抽出式を試せます。
+テンポラリ式も複数指定できます。画面上では1行1式で編集します。
+
+```text
+GET /view/:device/:label?token=...&expression=%24%5B0%5D&expression=%24%5B1%5D&expression=%24%5B2%5D
+```
+
+readonly pageではブラウザ側でもJSONataを評価するため、定義済みextractorに加えて、画面上で一時的な抽出式を試せます。定義済みextractorとテンポラリ式は同時に表示できます。
+
+画面上部の `load from` / `load to` は、表示可能な最大データ範囲を指定します。`load to` は空欄にでき、空欄の場合は「現在まで」を対象にしてリアルタイムデータへ追従します。`load to` を指定した場合は過去範囲の閲覧となり、リアルタイム追従は行いません。グラフ下の範囲バーは、読み込んだ最大範囲の中で実際に表示する時間窓を調整します。
 
 readonly metadata:
 

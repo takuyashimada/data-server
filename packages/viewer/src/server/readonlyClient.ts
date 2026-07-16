@@ -12,6 +12,7 @@ export const readonlyClientScript = `(() => {
     chartMessage: document.getElementById("chartMessage"),
     latest: document.getElementById("latest"),
     records: document.getElementById("records"),
+    recordsHead: document.getElementById("recordsHead"),
     recordsUnit: document.getElementById("recordsUnit"),
     rangeTrack: document.getElementById("rangeTrack"),
     rangeSelection: document.getElementById("rangeSelection"),
@@ -22,40 +23,61 @@ export const readonlyClientScript = `(() => {
     rangeWindowLabel: document.getElementById("rangeWindowLabel"),
     rangeModeLabel: document.getElementById("rangeModeLabel")
   };
+
   let eventSource = null;
   let metadata = null;
   let records = [];
   let evaluatedRows = [];
-  let points = [];
+  let seriesPoints = [];
   let viewStartMs = null;
   let viewEndMs = null;
   let dataStartMs = null;
   let dataEndMs = null;
   let liveFollow = true;
+
   const defaultWindowMs = 60 * 60 * 1000;
   const minWindowMs = 1000;
+  const colors = ["#0f766e", "#2563eb", "#c2410c", "#7c3aed", "#be123c", "#15803d", "#a16207", "#0e7490"];
 
   const pageParams = new URLSearchParams(location.search);
   const apiBase = "/api/view/" + encodeURIComponent(state.device) + "/" + encodeURIComponent(state.label);
 
-  function selectedExtractor() {
-    return metadata?.extractors.find((item) => item.id === els.extractor.value) ?? null;
+  function selectedExtractors() {
+    const ids = Array.from(els.extractor.selectedOptions).map((option) => option.value).filter(Boolean);
+    return ids.map((id) => metadata?.extractors.find((item) => item.id === id)).filter(Boolean);
   }
 
-  function activeExpression() {
-    return els.expression.value.trim();
+  function activeExpressions() {
+    return els.expression.value
+      .split("\\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
   }
 
-  function activeUnit() {
-    const extractor = selectedExtractor();
-    if (extractor && activeExpression() === extractor.expression && extractor.unit) {
-      return extractor.unit;
-    }
-    return "";
+  function activeSeries() {
+    const configured = selectedExtractors().map((extractor, index) => ({
+      key: "extractor:" + extractor.id,
+      label: extractor.labelText,
+      expression: extractor.expression,
+      unit: extractor.unit ?? "",
+      color: colors[index % colors.length]
+    }));
+
+    const expressions = activeExpressions();
+    const temporary = expressions
+      .filter((expression) => !configured.some((series) => series.expression === expression))
+      .map((expression, index) => ({
+        key: "expression:" + index + ":" + expression,
+        label: "Expression " + (index + 1),
+        expression,
+        unit: "",
+        color: colors[(configured.length + index) % colors.length]
+      }));
+
+    return configured.concat(temporary);
   }
 
-  function unitSuffix() {
-    const unit = activeUnit();
+  function unitSuffix(unit) {
     return unit ? " " + unit : "";
   }
 
@@ -71,6 +93,14 @@ export const readonlyClientScript = `(() => {
 
   function fromLocalInputValue(value) {
     return new Date(value);
+  }
+
+  function hasFixedTo() {
+    return Boolean(els.to.value);
+  }
+
+  function canLiveFollow() {
+    return !hasFixedTo();
   }
 
   function recordTime(record) {
@@ -137,30 +167,37 @@ export const readonlyClientScript = `(() => {
     return rows;
   }
 
-  async function evaluateRecord(record) {
-    const expression = activeExpression();
-    if (!expression) {
-      return { record, value: record.data, point: typeof record.data === "number" ? { t: record.receivedAt, v: record.data } : null };
+  async function evaluateRecord(record, series = activeSeries()) {
+    if (!series.length) {
+      return { record, values: [], pointValues: [] };
     }
 
-    const compiled = jsonata(expression);
-    const value = await compiled.evaluate(record.data);
-    return {
-      record,
-      value,
-      point: typeof value === "number" && Number.isFinite(value) ? { t: record.receivedAt, v: value } : null
-    };
+    const values = [];
+    const pointValues = [];
+    for (const item of series) {
+      const compiled = jsonata(item.expression);
+      const value = await compiled.evaluate(record.data);
+      values.push(value);
+      pointValues.push(typeof value === "number" && Number.isFinite(value) ? value : null);
+    }
+
+    return { record, values, pointValues };
   }
 
   async function evaluateAll() {
+    const series = activeSeries();
     evaluatedRows = [];
-    points = [];
+    seriesPoints = series.map((item) => ({ series: item, points: [] }));
     for (let i = records.length - 1; i >= 0; i--) {
-      const row = await evaluateRecord(records[i]);
+      const row = await evaluateRecord(records[i], series);
       evaluatedRows.push(row);
-      if (row.point) points.push(row.point);
+      row.pointValues.forEach((value, index) => {
+        if (value !== null) {
+          seriesPoints[index].points.push({ t: records[i].receivedAt, v: value });
+        }
+      });
     }
-    points.reverse();
+    seriesPoints.forEach((item) => item.points.reverse());
   }
 
   function updateDataBounds() {
@@ -199,10 +236,6 @@ export const readonlyClientScript = `(() => {
     if (end - start < minWindowMs) end = start + minWindowMs;
     [viewStartMs, viewEndMs] = clampView(start, end);
     if (options.follow !== undefined) liveFollow = options.follow;
-    if (options.syncInputs !== false) {
-      els.from.value = toLocalInputValue(new Date(viewStartMs));
-      els.to.value = toLocalInputValue(new Date(viewEndMs));
-    }
     updateRangeEditor();
     drawChart();
   }
@@ -212,15 +245,18 @@ export const readonlyClientScript = `(() => {
     const fallbackEnd = Date.now();
     const end = dataEndMs ?? fallbackEnd;
     const start = Math.max(dataStartMs ?? (end - defaultWindowMs), end - defaultWindowMs);
-    setViewRange(start, end, { follow: true });
+    setViewRange(start, end, { follow: canLiveFollow() });
   }
 
-  function visiblePoints() {
-    if (viewStartMs == null || viewEndMs == null) return points;
-    return points.filter((point) => {
-      const t = new Date(point.t).getTime();
-      return t >= viewStartMs && t <= viewEndMs;
-    });
+  function visibleSeriesPoints() {
+    if (viewStartMs == null || viewEndMs == null) return seriesPoints;
+    return seriesPoints.map((item) => ({
+      series: item.series,
+      points: item.points.filter((point) => {
+        const t = new Date(point.t).getTime();
+        return t >= viewStartMs && t <= viewEndMs;
+      })
+    }));
   }
 
   function visibleRows() {
@@ -232,14 +268,17 @@ export const readonlyClientScript = `(() => {
   }
 
   function renderLatest(row) {
+    const series = activeSeries();
     if (!row) {
       els.latest.innerHTML = '<div class="message">No records.</div>';
       return;
     }
 
-    if (activeExpression()) {
-      const label = selectedExtractor()?.labelText ?? "Temporary expression";
-      els.latest.innerHTML = '<div class="metric"><div class="name">' + escapeHtml(label) + '</div><div class="value">' + escapeHtml(fmt(row.value) + unitSuffix()) + '</div></div>';
+    if (series.length) {
+      els.latest.innerHTML = series.map((item, index) => {
+        const value = row.values[index];
+        return '<div class="metric"><div class="name"><span class="swatch" style="background:' + escapeHtml(item.color) + '"></span>' + escapeHtml(item.label) + '</div><div class="value">' + escapeHtml(fmt(value) + unitSuffix(item.unit)) + '</div></div>';
+      }).join("");
       return;
     }
 
@@ -250,15 +289,30 @@ export const readonlyClientScript = `(() => {
   }
 
   function renderRecords() {
-    const useExpression = Boolean(activeExpression());
-    els.recordsUnit.textContent = activeUnit() ? "(" + activeUnit() + ")" : "";
-    els.records.innerHTML = visibleRows().slice(0, 200).map((row) => {
-      const value = useExpression ? fmt(row.value) + unitSuffix() : JSON.stringify(row.record.data, null, 2);
-      return "<tr><td>" + escapeHtml(row.record.receivedAt) + '</td><td class="mono">' + escapeHtml(value) + "</td></tr>";
-    }).join("");
+    const series = activeSeries();
+    const unitLabels = Array.from(new Set(series.map((item) => item.unit).filter(Boolean)));
+    els.recordsUnit.textContent = unitLabels.length === 1 ? "(" + unitLabels[0] + ")" : "";
+
+    if (!series.length) {
+      els.recordsHead.innerHTML = '<tr><th style="width: 220px;">receivedAt</th><th>data</th></tr>';
+      els.records.innerHTML = visibleRows().slice(0, 200).map((row) => (
+        "<tr><td>" + escapeHtml(row.record.receivedAt) + '</td><td class="mono">' + escapeHtml(JSON.stringify(row.record.data, null, 2)) + "</td></tr>"
+      )).join("");
+      return;
+    }
+
+    els.recordsHead.innerHTML = '<tr><th style="width: 220px;">receivedAt</th>' + series.map((item) => (
+      '<th><span class="swatch" style="background:' + escapeHtml(item.color) + '"></span>' + escapeHtml(item.label + unitSuffix(item.unit)) + '</th>'
+    )).join("") + '</tr>';
+
+    els.records.innerHTML = visibleRows().slice(0, 200).map((row) => (
+      "<tr><td>" + escapeHtml(row.record.receivedAt) + "</td>" + series.map((_item, index) => (
+        '<td class="mono">' + escapeHtml(fmt(row.values[index])) + "</td>"
+      )).join("") + "</tr>"
+    )).join("");
   }
 
-  function drawChart(inputPoints = visiblePoints()) {
+  function drawChart(inputSeries = visibleSeriesPoints()) {
     const canvas = els.chart;
     const rect = canvas.getBoundingClientRect();
     const scale = window.devicePixelRatio || 1;
@@ -278,8 +332,9 @@ export const readonlyClientScript = `(() => {
     ctx.lineWidth = 1;
     ctx.strokeRect(pad.left, pad.top, plotW, plotH);
 
-    const minX = viewStartMs ?? (inputPoints.length ? Math.min(...inputPoints.map((p) => new Date(p.t).getTime())) : Date.now() - defaultWindowMs);
-    const maxX = viewEndMs ?? (inputPoints.length ? Math.max(...inputPoints.map((p) => new Date(p.t).getTime())) : Date.now());
+    const allPoints = inputSeries.flatMap((item) => item.points);
+    const minX = viewStartMs ?? (allPoints.length ? Math.min(...allPoints.map((p) => new Date(p.t).getTime())) : Date.now() - defaultWindowMs);
+    const maxX = viewEndMs ?? (allPoints.length ? Math.max(...allPoints.map((p) => new Date(p.t).getTime())) : Date.now());
     const xSpan = maxX - minX || 1;
 
     ctx.fillStyle = "#687386";
@@ -297,14 +352,13 @@ export const readonlyClientScript = `(() => {
       ctx.fillText(formatAxisTime(value, xSpan), x, pad.top + plotH + 10);
     }
 
-    if (!inputPoints.length) {
+    if (!allPoints.length) {
       els.chartMessage.textContent = "No numeric points for the selected range.";
       updateRangeEditor();
       return;
     }
-    els.chartMessage.textContent = inputPoints.length + " points" + unitSuffix();
 
-    const ys = inputPoints.map((p) => p.v);
+    const ys = allPoints.map((p) => p.v);
     let minY = Math.min(...ys);
     let maxY = Math.max(...ys);
     if (minY === maxY) {
@@ -327,16 +381,26 @@ export const readonlyClientScript = `(() => {
       ctx.fillText(fmt(value), pad.left - 8, y);
     }
 
-    ctx.strokeStyle = "#0f766e";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    inputPoints.forEach((point, index) => {
-      const x = pad.left + ((new Date(point.t).getTime() - minX) / xSpan) * plotW;
-      const y = pad.top + (1 - ((point.v - minY) / ySpan)) * plotH;
-      if (index === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+    inputSeries.forEach((item) => {
+      if (!item.points.length) return;
+      ctx.strokeStyle = item.series.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      item.points.forEach((point, index) => {
+        const x = pad.left + ((new Date(point.t).getTime() - minX) / xSpan) * plotW;
+        const y = pad.top + (1 - ((point.v - minY) / ySpan)) * plotH;
+        if (index === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
     });
-    ctx.stroke();
+
+    const unitLabels = Array.from(new Set(inputSeries.map((item) => item.series.unit).filter(Boolean)));
+    const totalPoints = allPoints.length;
+    const seriesLabel = inputSeries.filter((item) => item.points.length).length + " series";
+    els.chartMessage.innerHTML = escapeHtml(totalPoints + " points / " + seriesLabel + (unitLabels.length === 1 ? " " + unitLabels[0] : "")) + '<div class="legend">' + inputSeries.map((item) => (
+      '<span><span class="swatch" style="background:' + escapeHtml(item.series.color) + '"></span>' + escapeHtml(item.series.label + unitSuffix(item.series.unit)) + '</span>'
+    )).join("") + "</div>";
     updateRangeEditor();
   }
 
@@ -389,19 +453,27 @@ export const readonlyClientScript = `(() => {
     return params;
   }
 
+  function requestedExtractorIds() {
+    const values = pageParams.getAll("extractor").flatMap((value) => value.split(","));
+    return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+  }
+
   async function loadMetadata() {
     metadata = await getJson(apiBase + "/metadata?token=" + encodeURIComponent(state.token));
-    els.extractor.innerHTML = '<option value="">temporary/raw</option>' + metadata.extractors.map((item) => (
+    els.extractor.innerHTML = metadata.extractors.map((item) => (
       '<option value="' + escapeHtml(item.id) + '">' + escapeHtml(item.labelText + (item.unit ? " (" + item.unit + ")" : "")) + "</option>"
     )).join("");
 
-    const requestedExtractor = pageParams.get("extractor");
-    const requestedExpression = pageParams.get("expression");
-    if (requestedExtractor && metadata.extractors.some((item) => item.id === requestedExtractor)) {
-      els.extractor.value = requestedExtractor;
-      els.expression.value = selectedExtractor()?.expression ?? "";
-    } else if (requestedExpression) {
-      els.expression.value = requestedExpression;
+    const ids = requestedExtractorIds();
+    if (ids.length) {
+      Array.from(els.extractor.options).forEach((option) => {
+        option.selected = ids.includes(option.value);
+      });
+    }
+
+    const requestedExpressions = pageParams.getAll("expression").flatMap((value) => value.split("\\n"));
+    if (requestedExpressions.length) {
+      els.expression.value = requestedExpressions.map((value) => value.trim()).filter(Boolean).join("\\n");
     }
   }
 
@@ -410,8 +482,10 @@ export const readonlyClientScript = `(() => {
     records = history.records ?? [];
     await evaluateAll();
     updateDataBounds();
+    const follow = canLiveFollow() && (options.keepView ? liveFollow : true);
+    liveFollow = follow;
     if (options.keepView && viewStartMs != null && viewEndMs != null) {
-      setViewRange(viewStartMs, viewEndMs, { follow: liveFollow });
+      setViewRange(viewStartMs, viewEndMs, { follow });
     } else {
       ensureInitialView();
     }
@@ -421,15 +495,11 @@ export const readonlyClientScript = `(() => {
   function updateUrlState() {
     const params = new URLSearchParams(location.search);
     params.set("token", state.token);
-    if (els.extractor.value) params.set("extractor", els.extractor.value);
-    else params.delete("extractor");
+    params.delete("extractor");
+    params.delete("expression");
 
-    const extractor = selectedExtractor();
-    if (activeExpression() && (!extractor || activeExpression() !== extractor.expression)) {
-      params.set("expression", activeExpression());
-    } else {
-      params.delete("expression");
-    }
+    selectedExtractors().forEach((extractor) => params.append("extractor", extractor.id));
+    activeExpressions().forEach((expression) => params.append("expression", expression));
     history.replaceState(null, "", location.pathname + "?" + params.toString());
   }
 
@@ -441,17 +511,25 @@ export const readonlyClientScript = `(() => {
     eventSource.onerror = () => setStatus("live disconnected", "error");
     eventSource.onmessage = async (event) => {
       const record = JSON.parse(event.data);
+      if (!canLiveFollow()) {
+        liveFollow = false;
+        updateRangeEditor();
+        return;
+      }
       const oldEnd = dataEndMs;
+      const series = activeSeries();
       records.push(record);
       records = records.slice(-10000);
       try {
-        const row = await evaluateRecord(record);
+        const row = await evaluateRecord(record, series);
         evaluatedRows.unshift(row);
         evaluatedRows = evaluatedRows.slice(0, 10000);
-        if (row.point) {
-          points.push(row.point);
-          points = points.slice(-10000);
-        }
+        row.pointValues.forEach((value, index) => {
+          if (value !== null && seriesPoints[index]) {
+            seriesPoints[index].points.push({ t: record.receivedAt, v: value });
+            seriesPoints[index].points = seriesPoints[index].points.slice(-10000);
+          }
+        });
         updateDataBounds();
         if (liveFollow || (oldEnd != null && viewEndMs != null && Math.abs(viewEndMs - oldEnd) < 2000)) {
           const width = viewStartMs != null && viewEndMs != null ? viewEndMs - viewStartMs : defaultWindowMs;
@@ -469,15 +547,12 @@ export const readonlyClientScript = `(() => {
   }
 
   async function onExtractorChange() {
-    const extractor = selectedExtractor();
-    els.expression.value = extractor?.expression ?? "";
     updateUrlState();
     await recomputeAndRender();
   }
 
   let expressionTimer = null;
   function onExpressionInput() {
-    els.extractor.value = "";
     updateUrlState();
     clearTimeout(expressionTimer);
     expressionTimer = setTimeout(() => {
@@ -500,7 +575,6 @@ export const readonlyClientScript = `(() => {
       drag = {
         mode,
         pointerId: event.pointerId,
-        startX: event.clientX,
         initialStart: viewStartMs,
         initialEnd: viewEndMs,
         initialMs: eventToMs(event)
@@ -549,26 +623,18 @@ export const readonlyClientScript = `(() => {
 
   async function init() {
     const now = new Date();
-    els.to.value = toLocalInputValue(now);
     els.from.value = toLocalInputValue(new Date(now.getTime() - defaultWindowMs));
-    els.from.addEventListener("change", () => {
-      liveFollow = false;
-      setViewRange(fromLocalInputValue(els.from.value).getTime(), fromLocalInputValue(els.to.value).getTime(), { follow: false });
-      renderRecords();
-    });
-    els.to.addEventListener("change", () => {
-      liveFollow = false;
-      setViewRange(fromLocalInputValue(els.from.value).getTime(), fromLocalInputValue(els.to.value).getTime(), { follow: false });
-      renderRecords();
-    });
+    els.to.value = "";
+    els.from.addEventListener("change", () => loadHistory().catch(showError));
+    els.to.addEventListener("change", () => loadHistory().catch(showError));
     els.extractor.addEventListener("change", () => onExtractorChange().catch(showError));
     els.expression.addEventListener("input", onExpressionInput);
     els.load.addEventListener("click", () => loadHistory({ keepView: true }).catch(showError));
     els.live.addEventListener("click", () => {
-      liveFollow = true;
+      liveFollow = canLiveFollow();
       if (dataEndMs != null && viewStartMs != null && viewEndMs != null) {
         const width = viewEndMs - viewStartMs;
-        setViewRange(dataEndMs - width, dataEndMs, { follow: true });
+        setViewRange(dataEndMs - width, dataEndMs, { follow: canLiveFollow() });
       }
       connectRealtime();
     });

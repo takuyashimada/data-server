@@ -93,7 +93,7 @@ export function readonlyPage(device: string, label: string, token: string): stri
         font-size: 12px;
         color: var(--muted);
       }
-      select, input, button {
+      select, input, textarea, button {
         height: 34px;
         border: 1px solid var(--panel-border);
         background: #fff;
@@ -101,6 +101,18 @@ export function readonlyPage(device: string, label: string, token: string): stri
         font: inherit;
         font-size: 14px;
         padding: 0 10px;
+      }
+      textarea {
+        height: 72px;
+        min-width: 260px;
+        padding: 8px 10px;
+        resize: vertical;
+        line-height: 1.35;
+      }
+      select[multiple] {
+        height: 72px;
+        min-width: 220px;
+        padding: 6px;
       }
       button {
         cursor: pointer;
@@ -208,6 +220,9 @@ export function readonlyPage(device: string, label: string, token: string): stri
         min-width: 0;
       }
       .metric .name {
+        display: flex;
+        align-items: center;
+        gap: 6px;
         color: var(--muted);
         font-size: 12px;
         overflow-wrap: anywhere;
@@ -254,6 +269,24 @@ export function readonlyPage(device: string, label: string, token: string): stri
         font-size: 12px;
         font-weight: 500;
       }
+      .legend {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+      }
+      .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .swatch {
+        display: inline-block;
+        flex: 0 0 auto;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+      }
       .error-text { color: var(--danger); }
       @media (max-width: 860px) {
         header { align-items: flex-start; flex-direction: column; }
@@ -271,19 +304,19 @@ export function readonlyPage(device: string, label: string, token: string): stri
     <main>
       <div class="toolbar">
         <label>
-          extractor
-          <select id="extractor"></select>
+          extractors
+          <select id="extractor" multiple></select>
         </label>
         <label>
-          expression
-          <input id="expression" type="text" placeholder="temperature">
+          temporary expressions
+          <textarea id="expression" placeholder="$[0]&#10;$[1]"></textarea>
         </label>
         <label>
-          from
+          load from
           <input id="from" type="datetime-local">
         </label>
         <label>
-          to
+          load to
           <input id="to" type="datetime-local">
         </label>
         <button id="load" type="button">Load</button>
@@ -322,7 +355,7 @@ export function readonlyPage(device: string, label: string, token: string): stri
         <h2>Recent Records <span id="recordsUnit" class="unit"></span></h2>
         <div class="records">
           <table>
-            <thead><tr><th style="width: 220px;">receivedAt</th><th>data</th></tr></thead>
+            <thead id="recordsHead"><tr><th style="width: 220px;">receivedAt</th><th>data</th></tr></thead>
             <tbody id="records"></tbody>
           </table>
         </div>
