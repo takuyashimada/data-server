@@ -123,6 +123,52 @@ export function readonlyPage(device: string, label: string, token: string): stri
         font-size: 13px;
         color: var(--text);
       }
+      .range-editor {
+        margin-top: 12px;
+        display: grid;
+        gap: 8px;
+      }
+      .range-scale, .range-meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+      .range-track {
+        position: relative;
+        height: 34px;
+        border: 1px solid var(--panel-border);
+        background:
+          linear-gradient(to right, rgba(15, 118, 110, 0.10), rgba(15, 118, 110, 0.10)),
+          #f9fafb;
+        user-select: none;
+        touch-action: none;
+      }
+      .range-selection {
+        position: absolute;
+        top: 4px;
+        bottom: 4px;
+        left: 0;
+        right: 0;
+        min-width: 18px;
+        border: 1px solid var(--accent);
+        background: rgba(15, 118, 110, 0.18);
+        cursor: grab;
+      }
+      .range-selection.dragging { cursor: grabbing; }
+      .range-handle {
+        position: absolute;
+        top: -5px;
+        width: 14px;
+        height: 34px;
+        border: 2px solid var(--accent);
+        background: #fff;
+        cursor: ew-resize;
+      }
+      .range-handle.left { left: -8px; }
+      .range-handle.right { right: -8px; }
       .grid {
         display: grid;
         grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
@@ -242,17 +288,28 @@ export function readonlyPage(device: string, label: string, token: string): stri
         </label>
         <button id="load" type="button">Load</button>
         <button id="live" class="secondary" type="button">Reconnect live</button>
-        <label>
-          chart range
-          <input id="range" type="range" min="1" max="1440" step="1" value="60">
-        </label>
-        <div id="rangeValue" class="range-value">60 min</div>
       </div>
       <div class="grid">
         <section>
           <h2>History</h2>
           <div class="chart-wrap">
             <canvas id="chart" width="900" height="360"></canvas>
+            <div class="range-editor">
+              <div class="range-scale">
+                <span id="rangeStartLabel">--</span>
+                <span id="rangeEndLabel">--</span>
+              </div>
+              <div id="rangeTrack" class="range-track">
+                <div id="rangeSelection" class="range-selection">
+                  <span id="rangeLeft" class="range-handle left"></span>
+                  <span id="rangeRight" class="range-handle right"></span>
+                </div>
+              </div>
+              <div class="range-meta">
+                <span id="rangeWindowLabel">--</span>
+                <span id="rangeModeLabel">live follow</span>
+              </div>
+            </div>
           </div>
           <div id="chartMessage" class="message"></div>
         </section>

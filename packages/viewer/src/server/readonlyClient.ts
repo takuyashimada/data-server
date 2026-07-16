@@ -6,21 +6,34 @@ export const readonlyClientScript = `(() => {
     expression: document.getElementById("expression"),
     from: document.getElementById("from"),
     to: document.getElementById("to"),
-    range: document.getElementById("range"),
-    rangeValue: document.getElementById("rangeValue"),
     load: document.getElementById("load"),
     live: document.getElementById("live"),
     chart: document.getElementById("chart"),
     chartMessage: document.getElementById("chartMessage"),
     latest: document.getElementById("latest"),
     records: document.getElementById("records"),
-    recordsUnit: document.getElementById("recordsUnit")
+    recordsUnit: document.getElementById("recordsUnit"),
+    rangeTrack: document.getElementById("rangeTrack"),
+    rangeSelection: document.getElementById("rangeSelection"),
+    rangeLeft: document.getElementById("rangeLeft"),
+    rangeRight: document.getElementById("rangeRight"),
+    rangeStartLabel: document.getElementById("rangeStartLabel"),
+    rangeEndLabel: document.getElementById("rangeEndLabel"),
+    rangeWindowLabel: document.getElementById("rangeWindowLabel"),
+    rangeModeLabel: document.getElementById("rangeModeLabel")
   };
   let eventSource = null;
   let metadata = null;
   let records = [];
   let evaluatedRows = [];
   let points = [];
+  let viewStartMs = null;
+  let viewEndMs = null;
+  let dataStartMs = null;
+  let dataEndMs = null;
+  let liveFollow = true;
+  const defaultWindowMs = 60 * 60 * 1000;
+  const minWindowMs = 1000;
 
   const pageParams = new URLSearchParams(location.search);
   const apiBase = "/api/view/" + encodeURIComponent(state.device) + "/" + encodeURIComponent(state.label);
@@ -60,17 +73,8 @@ export const readonlyClientScript = `(() => {
     return new Date(value);
   }
 
-  function updateRangeLabel() {
-    const minutes = Number(els.range.value);
-    els.rangeValue.textContent = minutes < 60 ? minutes + " min" : (minutes / 60).toFixed(minutes % 60 ? 1 : 0) + " h";
-  }
-
-  function applyRangeToInputs() {
-    const now = new Date();
-    const minutes = Number(els.range.value);
-    els.to.value = toLocalInputValue(now);
-    els.from.value = toLocalInputValue(new Date(now.getTime() - minutes * 60 * 1000));
-    updateRangeLabel();
+  function recordTime(record) {
+    return new Date(record.receivedAt).getTime();
   }
 
   function fmt(value) {
@@ -78,6 +82,34 @@ export const readonlyClientScript = `(() => {
     if (typeof value === "string") return value;
     if (value === undefined) return "undefined";
     return JSON.stringify(value);
+  }
+
+  function formatDateTime(ms) {
+    if (!Number.isFinite(ms)) return "--";
+    const date = new Date(ms);
+    return date.toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+
+  function formatAxisTime(ms, span) {
+    const date = new Date(ms);
+    if (span > 24 * 60 * 60 * 1000) {
+      return date.toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+    }
+    if (span > 60 * 60 * 1000) {
+      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+
+  function formatDuration(ms) {
+    const seconds = Math.round(ms / 1000);
+    if (seconds < 60) return seconds + " s";
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) return minutes + " min";
+    const hours = minutes / 60;
+    if (hours < 24) return hours.toFixed(minutes % 60 ? 1 : 0) + " h";
+    const days = hours / 24;
+    return days.toFixed(hours % 24 ? 1 : 0) + " d";
   }
 
   function escapeHtml(value) {
@@ -121,15 +153,82 @@ export const readonlyClientScript = `(() => {
   }
 
   async function evaluateAll() {
-    const newestFirst = records.slice().reverse();
     evaluatedRows = [];
     points = [];
-    for (const record of newestFirst) {
-      const row = await evaluateRecord(record);
+    for (let i = records.length - 1; i >= 0; i--) {
+      const row = await evaluateRecord(records[i]);
       evaluatedRows.push(row);
       if (row.point) points.push(row.point);
     }
     points.reverse();
+  }
+
+  function updateDataBounds() {
+    const times = records.map(recordTime).filter(Number.isFinite);
+    if (!times.length) {
+      dataStartMs = null;
+      dataEndMs = null;
+      return;
+    }
+    dataStartMs = Math.min(...times);
+    dataEndMs = Math.max(...times);
+  }
+
+  function clampView(start, end) {
+    if (dataStartMs == null || dataEndMs == null) {
+      return [start, end];
+    }
+    let width = Math.max(minWindowMs, end - start);
+    const dataWidth = Math.max(minWindowMs, dataEndMs - dataStartMs);
+    width = Math.min(width, dataWidth);
+    if (start < dataStartMs) {
+      start = dataStartMs;
+      end = start + width;
+    }
+    if (end > dataEndMs) {
+      end = dataEndMs;
+      start = end - width;
+    }
+    if (start < dataStartMs) start = dataStartMs;
+    return [start, end];
+  }
+
+  function setViewRange(start, end, options = {}) {
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+    if (end < start) [start, end] = [end, start];
+    if (end - start < minWindowMs) end = start + minWindowMs;
+    [viewStartMs, viewEndMs] = clampView(start, end);
+    if (options.follow !== undefined) liveFollow = options.follow;
+    if (options.syncInputs !== false) {
+      els.from.value = toLocalInputValue(new Date(viewStartMs));
+      els.to.value = toLocalInputValue(new Date(viewEndMs));
+    }
+    updateRangeEditor();
+    drawChart();
+  }
+
+  function ensureInitialView() {
+    updateDataBounds();
+    const fallbackEnd = Date.now();
+    const end = dataEndMs ?? fallbackEnd;
+    const start = Math.max(dataStartMs ?? (end - defaultWindowMs), end - defaultWindowMs);
+    setViewRange(start, end, { follow: true });
+  }
+
+  function visiblePoints() {
+    if (viewStartMs == null || viewEndMs == null) return points;
+    return points.filter((point) => {
+      const t = new Date(point.t).getTime();
+      return t >= viewStartMs && t <= viewEndMs;
+    });
+  }
+
+  function visibleRows() {
+    if (viewStartMs == null || viewEndMs == null) return evaluatedRows;
+    return evaluatedRows.filter((row) => {
+      const t = recordTime(row.record);
+      return t >= viewStartMs && t <= viewEndMs;
+    });
   }
 
   function renderLatest(row) {
@@ -153,19 +252,10 @@ export const readonlyClientScript = `(() => {
   function renderRecords() {
     const useExpression = Boolean(activeExpression());
     els.recordsUnit.textContent = activeUnit() ? "(" + activeUnit() + ")" : "";
-    els.records.innerHTML = evaluatedRows.slice(0, 200).map((row) => {
+    els.records.innerHTML = visibleRows().slice(0, 200).map((row) => {
       const value = useExpression ? fmt(row.value) + unitSuffix() : JSON.stringify(row.record.data, null, 2);
       return "<tr><td>" + escapeHtml(row.record.receivedAt) + '</td><td class="mono">' + escapeHtml(value) + "</td></tr>";
     }).join("");
-  }
-
-  function visiblePoints() {
-    const from = els.from.value ? fromLocalInputValue(els.from.value).getTime() : -Infinity;
-    const to = els.to.value ? fromLocalInputValue(els.to.value).getTime() : Infinity;
-    return points.filter((point) => {
-      const t = new Date(point.t).getTime();
-      return t >= from && t <= to;
-    });
   }
 
   function drawChart(inputPoints = visiblePoints()) {
@@ -180,7 +270,7 @@ export const readonlyClientScript = `(() => {
     const height = canvas.height / scale;
     ctx.clearRect(0, 0, width, height);
 
-    const pad = { left: 64, right: 18, top: 18, bottom: 38 };
+    const pad = { left: 64, right: 18, top: 18, bottom: 44 };
     const plotW = width - pad.left - pad.right;
     const plotH = height - pad.top - pad.bottom;
 
@@ -188,27 +278,41 @@ export const readonlyClientScript = `(() => {
     ctx.lineWidth = 1;
     ctx.strokeRect(pad.left, pad.top, plotW, plotH);
 
+    const minX = viewStartMs ?? (inputPoints.length ? Math.min(...inputPoints.map((p) => new Date(p.t).getTime())) : Date.now() - defaultWindowMs);
+    const maxX = viewEndMs ?? (inputPoints.length ? Math.max(...inputPoints.map((p) => new Date(p.t).getTime())) : Date.now());
+    const xSpan = maxX - minX || 1;
+
+    ctx.fillStyle = "#687386";
+    ctx.font = "12px ui-monospace, Menlo, Consolas, monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    for (let i = 0; i <= 4; i++) {
+      const x = pad.left + plotW * i / 4;
+      const value = minX + xSpan * i / 4;
+      ctx.strokeStyle = "#eef1f5";
+      ctx.beginPath();
+      ctx.moveTo(x, pad.top);
+      ctx.lineTo(x, pad.top + plotH);
+      ctx.stroke();
+      ctx.fillText(formatAxisTime(value, xSpan), x, pad.top + plotH + 10);
+    }
+
     if (!inputPoints.length) {
       els.chartMessage.textContent = "No numeric points for the selected range.";
+      updateRangeEditor();
       return;
     }
     els.chartMessage.textContent = inputPoints.length + " points" + unitSuffix();
 
-    const xs = inputPoints.map((p) => new Date(p.t).getTime());
     const ys = inputPoints.map((p) => p.v);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
     let minY = Math.min(...ys);
     let maxY = Math.max(...ys);
     if (minY === maxY) {
       minY -= 1;
       maxY += 1;
     }
-    const xSpan = maxX - minX || 1;
     const ySpan = maxY - minY || 1;
 
-    ctx.fillStyle = "#687386";
-    ctx.font = "12px ui-monospace, Menlo, Consolas, monospace";
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
     for (let i = 0; i <= 4; i++) {
@@ -219,6 +323,7 @@ export const readonlyClientScript = `(() => {
       ctx.moveTo(pad.left, y);
       ctx.lineTo(pad.left + plotW, y);
       ctx.stroke();
+      ctx.fillStyle = "#687386";
       ctx.fillText(fmt(value), pad.left - 8, y);
     }
 
@@ -232,6 +337,29 @@ export const readonlyClientScript = `(() => {
       else ctx.lineTo(x, y);
     });
     ctx.stroke();
+    updateRangeEditor();
+  }
+
+  function updateRangeEditor() {
+    if (dataStartMs == null || dataEndMs == null || viewStartMs == null || viewEndMs == null) {
+      els.rangeStartLabel.textContent = "--";
+      els.rangeEndLabel.textContent = "--";
+      els.rangeWindowLabel.textContent = "--";
+      els.rangeModeLabel.textContent = liveFollow ? "live follow" : "manual";
+      els.rangeSelection.style.left = "0%";
+      els.rangeSelection.style.width = "100%";
+      return;
+    }
+
+    const span = Math.max(1, dataEndMs - dataStartMs);
+    const left = Math.max(0, Math.min(100, ((viewStartMs - dataStartMs) / span) * 100));
+    const right = Math.max(0, Math.min(100, ((viewEndMs - dataStartMs) / span) * 100));
+    els.rangeSelection.style.left = left + "%";
+    els.rangeSelection.style.width = Math.max(0.5, right - left) + "%";
+    els.rangeStartLabel.textContent = formatDateTime(dataStartMs);
+    els.rangeEndLabel.textContent = formatDateTime(dataEndMs);
+    els.rangeWindowLabel.textContent = formatDateTime(viewStartMs) + " - " + formatDateTime(viewEndMs) + " (" + formatDuration(viewEndMs - viewStartMs) + ")";
+    els.rangeModeLabel.textContent = liveFollow ? "live follow" : "manual";
   }
 
   function renderAll() {
@@ -242,6 +370,9 @@ export const readonlyClientScript = `(() => {
 
   async function recomputeAndRender() {
     await evaluateAll();
+    updateDataBounds();
+    if (viewStartMs == null || viewEndMs == null) ensureInitialView();
+    else updateRangeEditor();
     renderAll();
   }
 
@@ -274,10 +405,17 @@ export const readonlyClientScript = `(() => {
     }
   }
 
-  async function loadHistory() {
+  async function loadHistory(options = {}) {
     const history = await getJson(apiBase + "/history?" + historyParams().toString());
     records = history.records ?? [];
-    await recomputeAndRender();
+    await evaluateAll();
+    updateDataBounds();
+    if (options.keepView && viewStartMs != null && viewEndMs != null) {
+      setViewRange(viewStartMs, viewEndMs, { follow: liveFollow });
+    } else {
+      ensureInitialView();
+    }
+    renderAll();
   }
 
   function updateUrlState() {
@@ -303,11 +441,27 @@ export const readonlyClientScript = `(() => {
     eventSource.onerror = () => setStatus("live disconnected", "error");
     eventSource.onmessage = async (event) => {
       const record = JSON.parse(event.data);
+      const oldEnd = dataEndMs;
       records.push(record);
       records = records.slice(-10000);
-      applyRangeToInputs();
       try {
-        await recomputeAndRender();
+        const row = await evaluateRecord(record);
+        evaluatedRows.unshift(row);
+        evaluatedRows = evaluatedRows.slice(0, 10000);
+        if (row.point) {
+          points.push(row.point);
+          points = points.slice(-10000);
+        }
+        updateDataBounds();
+        if (liveFollow || (oldEnd != null && viewEndMs != null && Math.abs(viewEndMs - oldEnd) < 2000)) {
+          const width = viewStartMs != null && viewEndMs != null ? viewEndMs - viewStartMs : defaultWindowMs;
+          setViewRange((dataEndMs ?? Date.now()) - width, dataEndMs ?? Date.now(), { follow: true });
+          renderLatest(evaluatedRows[0]);
+          renderRecords();
+        } else {
+          updateRangeEditor();
+          renderAll();
+        }
       } catch (error) {
         showError(error);
       }
@@ -331,19 +485,94 @@ export const readonlyClientScript = `(() => {
     }, 180);
   }
 
-  async function init() {
-    applyRangeToInputs();
-    els.range.addEventListener("input", () => {
-      applyRangeToInputs();
-      drawChart();
+  function installRangeEditor() {
+    let drag = null;
+
+    function eventToMs(event) {
+      const rect = els.rangeTrack.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+      return (dataStartMs ?? 0) + ratio * Math.max(1, (dataEndMs ?? 1) - (dataStartMs ?? 0));
+    }
+
+    function begin(event, mode) {
+      if (dataStartMs == null || dataEndMs == null || viewStartMs == null || viewEndMs == null) return;
+      event.preventDefault();
+      drag = {
+        mode,
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        initialStart: viewStartMs,
+        initialEnd: viewEndMs,
+        initialMs: eventToMs(event)
+      };
+      els.rangeSelection.classList.add("dragging");
+      els.rangeTrack.setPointerCapture(event.pointerId);
+    }
+
+    els.rangeLeft.addEventListener("pointerdown", (event) => begin(event, "left"));
+    els.rangeRight.addEventListener("pointerdown", (event) => begin(event, "right"));
+    els.rangeSelection.addEventListener("pointerdown", (event) => {
+      if (event.target === els.rangeLeft || event.target === els.rangeRight) return;
+      begin(event, "move");
     });
-    els.range.addEventListener("change", () => loadHistory().catch(showError));
-    els.from.addEventListener("change", drawChart);
-    els.to.addEventListener("change", drawChart);
+    els.rangeTrack.addEventListener("pointerdown", (event) => {
+      if (event.target !== els.rangeTrack) return;
+      const center = eventToMs(event);
+      const width = viewEndMs != null && viewStartMs != null ? viewEndMs - viewStartMs : defaultWindowMs;
+      setViewRange(center - width / 2, center + width / 2, { follow: false });
+      begin(event, "move");
+    });
+    els.rangeTrack.addEventListener("pointermove", (event) => {
+      if (!drag) return;
+      const currentMs = eventToMs(event);
+      const delta = currentMs - drag.initialMs;
+      if (drag.mode === "left") {
+        setViewRange(Math.min(currentMs, drag.initialEnd - minWindowMs), drag.initialEnd, { follow: false });
+      } else if (drag.mode === "right") {
+        setViewRange(drag.initialStart, Math.max(currentMs, drag.initialStart + minWindowMs), { follow: false });
+      } else {
+        setViewRange(drag.initialStart + delta, drag.initialEnd + delta, { follow: false });
+      }
+      renderRecords();
+    });
+    els.rangeTrack.addEventListener("pointerup", (event) => {
+      if (!drag) return;
+      els.rangeSelection.classList.remove("dragging");
+      els.rangeTrack.releasePointerCapture(event.pointerId);
+      drag = null;
+    });
+    els.rangeTrack.addEventListener("pointercancel", () => {
+      els.rangeSelection.classList.remove("dragging");
+      drag = null;
+    });
+  }
+
+  async function init() {
+    const now = new Date();
+    els.to.value = toLocalInputValue(now);
+    els.from.value = toLocalInputValue(new Date(now.getTime() - defaultWindowMs));
+    els.from.addEventListener("change", () => {
+      liveFollow = false;
+      setViewRange(fromLocalInputValue(els.from.value).getTime(), fromLocalInputValue(els.to.value).getTime(), { follow: false });
+      renderRecords();
+    });
+    els.to.addEventListener("change", () => {
+      liveFollow = false;
+      setViewRange(fromLocalInputValue(els.from.value).getTime(), fromLocalInputValue(els.to.value).getTime(), { follow: false });
+      renderRecords();
+    });
     els.extractor.addEventListener("change", () => onExtractorChange().catch(showError));
     els.expression.addEventListener("input", onExpressionInput);
-    els.load.addEventListener("click", () => loadHistory().catch(showError));
-    els.live.addEventListener("click", connectRealtime);
+    els.load.addEventListener("click", () => loadHistory({ keepView: true }).catch(showError));
+    els.live.addEventListener("click", () => {
+      liveFollow = true;
+      if (dataEndMs != null && viewStartMs != null && viewEndMs != null) {
+        const width = viewEndMs - viewStartMs;
+        setViewRange(dataEndMs - width, dataEndMs, { follow: true });
+      }
+      connectRealtime();
+    });
+    installRangeEditor();
     await loadMetadata();
     await loadHistory();
     connectRealtime();
