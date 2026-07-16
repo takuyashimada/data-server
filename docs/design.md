@@ -45,7 +45,7 @@
 
 - 管理者UIを提供する。
 - デバイス・ラベル単位のreadonlyビューを提供する。
-- 受信プロセスからリアルタイムMQTTデータを購読する。
+- 設定されたMQTTブローカからリアルタイムMQTTデータを購読する。
 - 履歴グラフ表示のためにJSONLファイルを読み込む。
 - 管理者UIから抽出ルールを管理できるようにする。
 - 抽出ルールの変更を設定ファイルへ保存する。
@@ -56,7 +56,7 @@
 - `@fastify/websocket` または Server-Sent Events: ブラウザへのリアルタイム配信。
 - `mqtt`: 受信プロセスのMQTTトピック購読。
 - `uplot`: 軽量な時系列グラフ表示。
-- `jsonpath-plus` または `jsonata`: 任意JSONからグラフ対象値を抽出。
+- `jsonata`: 任意JSONからグラフ対象値を抽出し、係数適用やベクトルのmagnitudeなどの計算式を扱う。
 - `argon2`: 管理者パスワード・トークンハッシュの検証。
 
 ## 4. MQTTトピック設計
@@ -117,11 +117,13 @@ admin/anything
 
 ### 4.3 可視化プロセスの購読
 
-可視化プロセスは内部クライアントとしてMQTTブローカへ接続し、以下を購読する。
+可視化プロセスはMQTTクライアントとして、設定されたMQTTブローカへ接続し、以下を購読する。
 
 ```text
 devices/+/data/+
 ```
+
+通常運用では、同一サーバ上の受信プロセスが持つ内蔵MQTTブローカへ接続する。一方で、実データを本番または別ホストの受信プロセスで蓄積しながら、ローカル環境で可視化機能を開発できるように、可視化プロセスのMQTT接続先は設定で指定できるようにする。
 
 ブラウザからMQTTへ直接接続させない。可視化プロセスがMQTTデータを受け取り、WebSocketまたはServer-Sent Eventsでブラウザへ中継する。
 
@@ -170,17 +172,13 @@ data/devices/pump-01/vibration/2026-07-16.jsonl
 
 ### 6.1 ローテーション
 
-ファイルは日次でローテーションする。日付の基準はUTCまたはサーバローカル日付から選択できるようにする。
-
-初期推奨値: UTC日付。
+ファイルはUTC日付を基準に日次でローテーションする。
 
 理由:
 
 - 夏時間の影響を受けない。
 - ISO timestampと比較しやすい。
 - サーバのtimezone変更時にも曖昧さが少ない。
-
-運用上、ローカルカレンダー日付が重要な場合は設定で切り替えられるようにする。
 
 ### 6.2 保存期間
 
@@ -235,10 +233,30 @@ storage:
 viewer:
   host: "0.0.0.0"
   port: 3000
+  realtime:
+    mqtt:
+      url: "mqtt://127.0.0.1:1883"
+      username: "viewer"
+      password: "viewer-token"
 
 admin:
   passwordHash: "$argon2id$..."
 ```
+
+`viewer.realtime.mqtt.url` は、可視化プロセスがリアルタイム表示のために購読するMQTTブローカを指定する。これにより、たとえば本番サーバで受信・蓄積を継続しつつ、開発端末の可視化プロセスだけが本番MQTTブローカを購読してUI開発を行える。
+
+例:
+
+```yaml
+viewer:
+  realtime:
+    mqtt:
+      url: "mqtt://production.example.com:1883"
+      username: "viewer-dev"
+      password: "viewer-dev-token"
+```
+
+この接続情報はデバイス認証とは別に扱い、閲覧・購読専用の内部クライアントとして認可する。
 
 ### 7.2 デバイス設定
 
@@ -271,7 +289,7 @@ devices:
 
 ### 7.3 抽出ルール設定
 
-抽出ルールは、デバイスとラベルに紐づける。
+抽出ルールは、デバイスとラベルに紐づける。`expression` はJSONata式として扱う。
 
 ```yaml
 extractors:
@@ -279,7 +297,7 @@ extractors:
     device: "room-a-sensor"
     label: "environment"
     labelText: "Temperature"
-    expression: "$.temperature"
+    expression: "temperature"
     valueType: "number"
     unit: "degC"
     enabled: true
@@ -288,13 +306,22 @@ extractors:
     device: "room-a-sensor"
     label: "environment"
     labelText: "Humidity"
-    expression: "$.humidity"
+    expression: "humidity"
     valueType: "number"
     unit: "%"
     enabled: true
+
+  - id: "pump-vibration-magnitude"
+    device: "pump-01"
+    label: "vibration"
+    labelText: "Vibration magnitude"
+    expression: "$sqrt(x * x + y * y + z * z)"
+    valueType: "number"
+    unit: "m/s2"
+    enabled: true
 ```
 
-scalarなJSON payloadでは、ルート値を以下で選択する。
+scalarなJSON payloadでは、JSONataのルート値を以下で選択する。
 
 ```text
 $
@@ -309,7 +336,13 @@ $[0]
 objectでは以下のように指定する。
 
 ```text
-$.temperature
+temperature
+```
+
+係数を適用する場合は以下のように指定する。
+
+```text
+temperature * 1.8 + 32
 ```
 
 ## 8. 設定再読み込み
@@ -376,7 +409,7 @@ sensor with space
 
 ### 10.2 readonlyビュー
 
-readonlyビューは、1つのデバイスと1つのラベルに紐づく。
+readonlyビューは、1つのデバイスと1つのラベルに紐づく。閲覧トークンはURLのquery parameterとして扱う。
 
 URL形式:
 
@@ -481,7 +514,234 @@ event payload例:
 - readonlyビューでは、他のデバイス・ラベルのraw dataを返さない。
 - ファイルパスは検証済みのデバイス名・ラベル名からのみ生成する。
 
-## 15. 初期実装マイルストーン
+## 15. ソース構成・ビルド・デプロイ
+
+### 15.1 ソースディレクトリ構成
+
+実装はnpm workspacesを使ったmonorepo構成とする。
+
+```text
+data-server/
+  package.json
+  package-lock.json
+  tsconfig.base.json
+  tsconfig.json
+
+  docs/
+    design.md
+
+  config/
+    server.example.yaml
+    devices.example.yaml
+    extractors.example.yaml
+
+  data/
+    .gitkeep
+
+  packages/
+    shared/
+      package.json
+      tsconfig.json
+      src/
+        config/
+          schema.ts
+          loader.ts
+          watcher.ts
+        mqtt/
+          topics.ts
+          authz.ts
+        storage/
+          paths.ts
+          record.ts
+        security/
+          token.ts
+        logging/
+          logger.ts
+
+    receiver/
+      package.json
+      tsconfig.json
+      src/
+        main.ts
+        broker/
+          createBroker.ts
+          authenticate.ts
+          authorizePublish.ts
+        storage/
+          jsonlWriter.ts
+          retention.ts
+        configReload.ts
+
+    viewer/
+      package.json
+      tsconfig.json
+      src/
+        main.ts
+        server/
+          createServer.ts
+          auth.ts
+          routes/
+            admin.ts
+            readonly.ts
+            history.ts
+            realtime.ts
+        mqtt/
+          subscriber.ts
+        history/
+          jsonlReader.ts
+          extractor.ts
+        frontend/
+          index.html
+          src/
+            main.ts
+            admin.ts
+            readonly.ts
+            graph.ts
+```
+
+`shared` には、受信プロセスと可視化プロセスで同じ解釈が必要な処理を置く。
+
+- 設定schema。
+- 設定loader。
+- MQTT topic parser。
+- topic認可ロジック。
+- デバイス名・ラベル名のvalidation。
+- 保存パス生成。
+- 保存レコード型。
+- token hash検証。
+- logger作成。
+
+### 15.2 npm scripts
+
+root `package.json` のscript案:
+
+```json
+{
+  "scripts": {
+    "build": "tsc -b packages/shared packages/receiver packages/viewer",
+    "typecheck": "tsc -b --noEmit",
+    "dev:receiver": "npm run dev --workspace=@iot-data-server/receiver",
+    "dev:viewer": "npm run dev --workspace=@iot-data-server/viewer",
+    "start:receiver": "node packages/receiver/dist/main.js",
+    "start:viewer": "node packages/viewer/dist/main.js",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "workspaces": [
+    "packages/*"
+  ]
+}
+```
+
+開発時:
+
+```bash
+npm install
+npm run dev:receiver
+npm run dev:viewer
+```
+
+本番用ビルド:
+
+```bash
+npm run build
+```
+
+build成果物:
+
+```text
+packages/shared/dist/
+packages/receiver/dist/
+packages/viewer/dist/
+```
+
+### 15.3 ローカル可視化開発
+
+可視化プロセスは `viewer.realtime.mqtt.url` に指定されたMQTTブローカを購読する。
+
+そのため、以下のような開発が可能になる。
+
+- 本番サーバではreceiverが実データを受信・蓄積し続ける。
+- 開発端末ではviewerだけを起動する。
+- 開発端末のviewerは、本番または検証環境のMQTTブローカを購読する。
+- UIや履歴表示の開発中も、受信・蓄積プロセスを止めない。
+
+ローカル開発用設定例:
+
+```yaml
+viewer:
+  host: "127.0.0.1"
+  port: 3000
+  realtime:
+    mqtt:
+      url: "mqtt://production.example.com:1883"
+      username: "viewer-dev"
+      password: "viewer-dev-token"
+```
+
+履歴データについては、ローカルに同期されたJSONLファイルを読むか、将来的に本番viewer APIから取得するかを選択できる。初期実装では、ローカルファイルを読む方式を基本とする。
+
+### 15.4 デプロイ方法
+
+初期デプロイ方法はsystemdを推奨する。
+
+配置例:
+
+```text
+/opt/iot-data-server/app/
+/etc/iot-data-server/server.yaml
+/etc/iot-data-server/devices.yaml
+/etc/iot-data-server/extractors.yaml
+/var/lib/iot-data-server/data/
+/var/log/iot-data-server/
+```
+
+環境変数:
+
+```text
+IOT_DATA_SERVER_CONFIG_DIR=/etc/iot-data-server
+IOT_DATA_SERVER_DATA_DIR=/var/lib/iot-data-server/data
+NODE_ENV=production
+```
+
+systemd serviceは2つに分ける。
+
+```text
+iot-data-receiver.service
+iot-data-viewer.service
+```
+
+receiver service例:
+
+```ini
+[Service]
+WorkingDirectory=/opt/iot-data-server/app
+Environment=NODE_ENV=production
+Environment=IOT_DATA_SERVER_CONFIG_DIR=/etc/iot-data-server
+Environment=IOT_DATA_SERVER_DATA_DIR=/var/lib/iot-data-server/data
+ExecStart=/usr/bin/node packages/receiver/dist/main.js
+Restart=always
+```
+
+viewer service例:
+
+```ini
+[Service]
+WorkingDirectory=/opt/iot-data-server/app
+Environment=NODE_ENV=production
+Environment=IOT_DATA_SERVER_CONFIG_DIR=/etc/iot-data-server
+Environment=IOT_DATA_SERVER_DATA_DIR=/var/lib/iot-data-server/data
+ExecStart=/usr/bin/node packages/viewer/dist/main.js
+Restart=always
+```
+
+通常のUI更新では、receiverは再起動せずviewerだけを再起動する。
+
+```bash
+sudo systemctl restart iot-data-viewer
+```
+
+## 16. 初期実装マイルストーン
 
 ### Milestone 1: プロジェクト基盤
 
@@ -525,18 +785,11 @@ event payload例:
 - config validation、topic authorization、JSONL writeのテストを追加する。
 - TLS利用時のdeployment notesを追加する。
 
-## 16. 未確定事項
+## 17. 確定済みの設計判断
 
-以下はまだ確定していない。
+以下は設計上の確定事項とする。
 
-- 日次ローテーションの日付基準をUTCにするか、サーバローカル日付にするか。
-- 抽出ルールの式にJSONPathを使うか、JSONataを使うか。
-- readonly URLのtokenをquery parameterにするか、path parameterにするか。
-- 受信プロセスと可視化プロセスで共有するconfig/schema codeを、monorepo内の共通packageとして切り出すか。
-
-初期推奨値:
-
-- 日次ローテーションはUTC日付。
-- 抽出ルールはまずJSONPathを採用し、計算式が必要になったらJSONataを検討する。
-- readonly tokenは実装が単純なquery parameterとする。
-- config/schema codeは共有moduleとして作成する。
+- 日次ローテーションの日付基準はUTC日付にする。
+- 抽出ルールの式にはJSONataを使う。
+- readonly URLのtokenはquery parameterにする。
+- 受信プロセスと可視化プロセスで共有するconfig/schema codeは、monorepo内の共有moduleとして切り出す。
