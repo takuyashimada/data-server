@@ -21,6 +21,7 @@ storage:
 viewer:
   host: "0.0.0.0"
   port: 3000
+  basePath: ""
   realtime:
     mqtt:
       url: "mqtt://127.0.0.1:1883"

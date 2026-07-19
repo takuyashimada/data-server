@@ -7,10 +7,21 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
-export function readonlyPage(device: string, label: string, token: string): string {
+function normalizeBasePath(value: string | undefined): string {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed || trimmed === "/") {
+    return "";
+  }
+
+  const withLeadingSlash = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  return withLeadingSlash.replace(/\/+$/, "");
+}
+
+export function readonlyPage(device: string, label: string, token: string, basePath?: string): string {
+  const normalizedBasePath = normalizeBasePath(basePath);
   const escapedDevice = escapeHtml(device);
   const escapedLabel = escapeHtml(label);
-  const escapedToken = escapeHtml(token);
+  const escapedBasePath = escapeHtml(normalizedBasePath);
 
   return `<!doctype html>
 <html lang="ja">
@@ -412,11 +423,12 @@ export function readonlyPage(device: string, label: string, token: string): stri
       window.__VIEWER__ = {
         device: ${JSON.stringify(device)},
         label: ${JSON.stringify(label)},
-        token: ${JSON.stringify(token)}
+        token: ${JSON.stringify(token)},
+        basePath: ${JSON.stringify(normalizedBasePath)}
       };
     </script>
-    <script src="/assets/jsonata.min.js"></script>
-    <script src="/assets/readonly-view.js"></script>
+    <script src="${escapedBasePath}/assets/jsonata.min.js"></script>
+    <script src="${escapedBasePath}/assets/readonly-view.js"></script>
   </body>
 </html>`;
 }

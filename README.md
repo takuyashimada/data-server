@@ -62,6 +62,7 @@ storage:
 viewer:
   host: "0.0.0.0"
   port: 3000
+  basePath: ""
   realtime:
     mqtt:
       url: "mqtt://127.0.0.1:1883"
@@ -70,6 +71,8 @@ viewer:
 ```
 
 `viewer.realtime.mqtt.url` を変えると、ローカルのviewerから別ホストのMQTTブローカを購読できます。
+
+`viewer.basePath` は、nginxなどのリバースプロキシ配下でviewerをサブパスに置く場合の前置パスです。たとえば外部URLを `/iot-data/view/...` にする場合は `basePath: "/iot-data"` を指定します。空文字の場合は従来通りルート配下のURLを生成します。
 
 `maxClientIdLength` はMQTT client_idの最大長です。M5Stack/UIFlow2など、デバイス側が長いclient_idを自動生成する場合があるため、デフォルトでは128文字にしています。
 

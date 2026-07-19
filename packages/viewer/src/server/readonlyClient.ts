@@ -47,7 +47,8 @@ export const readonlyClientScript = `(() => {
   const colors = ["#0f766e", "#2563eb", "#c2410c", "#7c3aed", "#be123c", "#15803d", "#a16207", "#0e7490"];
 
   const pageParams = new URLSearchParams(location.search);
-  const apiBase = "/api/view/" + encodeURIComponent(state.device) + "/" + encodeURIComponent(state.label);
+  const basePath = state.basePath ?? "";
+  const apiBase = basePath + "/api/view/" + encodeURIComponent(state.device) + "/" + encodeURIComponent(state.label);
 
   function selectedExtractors() {
     const ids = Array.from(els.extractor.selectedOptions).map((option) => option.value).filter(Boolean);

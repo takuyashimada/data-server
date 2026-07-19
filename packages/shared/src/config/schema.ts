@@ -50,6 +50,7 @@ export const serverConfigSchema = z.object({
   viewer: z.object({
     host: z.string().default("0.0.0.0"),
     port: z.number().int().positive().default(3000),
+    basePath: z.string().default(""),
     realtime: z.object({
       mqtt: z.object({
         url: z.string().url().or(z.string().startsWith("mqtt://")).or(z.string().startsWith("mqtts://")),

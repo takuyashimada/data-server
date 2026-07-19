@@ -233,6 +233,7 @@ storage:
 viewer:
   host: "0.0.0.0"
   port: 3000
+  basePath: ""
   realtime:
     mqtt:
       url: "mqtt://127.0.0.1:1883"
@@ -244,6 +245,8 @@ admin:
 ```
 
 `viewer.realtime.mqtt.url` は、可視化プロセスがリアルタイム表示のために購読するMQTTブローカを指定する。これにより、たとえば本番サーバで受信・蓄積を継続しつつ、開発端末の可視化プロセスだけが本番MQTTブローカを購読してUI開発を行える。
+
+`viewer.basePath` は、リバースプロキシ配下でviewerをサブパス公開する場合の前置パスを指定する。空文字の場合はルート配下としてURLを生成する。
 
 例:
 

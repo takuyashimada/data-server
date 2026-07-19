@@ -16,6 +16,7 @@ const config = {
   viewer: {
     host: "127.0.0.1",
     port: 3000,
+    basePath: "",
     realtime: { mqtt: { url: "mqtt://127.0.0.1:1883", username: "viewer", password: "viewer-token" } },
   },
   admin: { passwordHash: "placeholder" },
@@ -58,6 +59,47 @@ describe("createServer readonly viewer", () => {
     expect(response.body).toContain("room-a-sensor / environment");
     expect(response.body).toContain("/assets/jsonata.min.js");
     expect(response.body).toContain("/assets/readonly-view.js");
+  });
+
+  it("uses the configured viewer basePath for readonly page URLs", async () => {
+    const app = createServer({
+      configDir: "/tmp/config",
+      get: () => ({
+        ...config,
+        viewer: {
+          ...config.viewer,
+          basePath: "/iot-data/",
+        },
+      }),
+    }, new EventEmitter() as never);
+
+    const response = await app.inject("/view/room-a-sensor/environment?token=readonly-token");
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain("basePath: \"/iot-data\"");
+    expect(response.body).toContain("src=\"/iot-data/assets/jsonata.min.js\"");
+    expect(response.body).toContain("src=\"/iot-data/assets/readonly-view.js\"");
+  });
+
+  it("serves readonly routes with the configured viewer basePath", async () => {
+    const app = createServer({
+      configDir: "/tmp/config",
+      get: () => ({
+        ...config,
+        viewer: {
+          ...config.viewer,
+          basePath: "/iot-data/",
+        },
+      }),
+    }, new EventEmitter() as never);
+
+    const response = await app.inject("/iot-data/view/room-a-sensor/environment?token=readonly-token");
+    const assetResponse = await app.inject("/iot-data/assets/readonly-view.js");
+    await app.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(assetResponse.statusCode).toBe(200);
   });
 
   it("rejects the readonly page when the view token is invalid", async () => {
