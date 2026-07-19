@@ -19,7 +19,7 @@ async function main() {
   const initialConfig = await loadConfig(configDir);
   const configRef = new ConfigRef(initialConfig, configDir);
   const logger = createLogger(initialConfig).child({ process: "viewer" });
-  const subscriber = new RealtimeSubscriber();
+  const subscriber = new RealtimeSubscriber(logger.child({ component: "realtime-mqtt" }));
   subscriber.start(initialConfig);
 
   const app = createServer(configRef, subscriber);

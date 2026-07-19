@@ -74,6 +74,8 @@ viewer:
 
 `viewer.basePath` は、nginxなどのリバースプロキシ配下でviewerをサブパスに置く場合の前置パスです。たとえば外部URLを `/iot-data/view/...` にする場合は `basePath: "/iot-data"` を指定します。空文字の場合は従来通りルート配下のURLを生成します。
 
+nginx配下でライブ更新を使う場合は、readonly realtime SSEのレスポンスがバッファされないようにします。viewerは `X-Accel-Buffering: no` を返しますが、nginx設定でも対象locationに `proxy_buffering off;` を指定してください。
+
 `maxClientIdLength` はMQTT client_idの最大長です。M5Stack/UIFlow2など、デバイス側が長いclient_idを自動生成する場合があるため、デフォルトでは128文字にしています。
 
 `storage.dataDir` に相対パスを指定した場合は、`config/` の親ディレクトリを基準に解決します。通常の開発環境では `./data` はプロジェクトroot直下の `data/` を指します。
@@ -318,6 +320,19 @@ readonly realtime SSE:
 
 ```text
 GET /api/view/:device/:label/realtime?token=...
+```
+
+nginxのリバースプロキシ配下でSSEを使う場合の例:
+
+```nginx
+location /iot-data/ {
+  proxy_pass http://127.0.0.1:3000/;
+  proxy_http_version 1.1;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_buffering off;
+  proxy_read_timeout 1h;
+}
 ```
 
 ## デプロイ方針

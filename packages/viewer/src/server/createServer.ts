@@ -162,19 +162,24 @@ export function createServer(configRef: ConfigRef, subscriber: RealtimeSubscribe
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
         connection: "keep-alive",
+        "x-accel-buffering": "no",
       });
+      reply.raw.flushHeaders();
       reply.raw.write(": connected\n\n");
+      request.log.info({ device, label }, "readonly realtime SSE connected");
 
       const onRecord = (record: unknown) => {
         const typed = record as { device: string; label: string };
         if (typed.device === device && typed.label === label) {
           reply.raw.write(`data: ${JSON.stringify(record)}\n\n`);
+          request.log.debug({ device, label }, "readonly realtime SSE sent record");
         }
       };
 
       subscriber.on("record", onRecord);
       request.raw.on("close", () => {
         subscriber.off("record", onRecord);
+        request.log.info({ device, label }, "readonly realtime SSE closed");
       });
     });
   }
