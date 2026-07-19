@@ -50,6 +50,37 @@ async function readYamlFile(filePath: string): Promise<unknown> {
   return YAML.parse(text) ?? {};
 }
 
+function withEnvironmentOverrides(config: Record<string, unknown>): Record<string, unknown> {
+  const realtimeMqttUrl = process.env.IOT_DATA_SERVER_VIEWER_MQTT_URL;
+  if (!realtimeMqttUrl) {
+    return config;
+  }
+
+  const viewer = typeof config.viewer === "object" && config.viewer !== null
+    ? config.viewer as Record<string, unknown>
+    : {};
+  const realtime = typeof viewer.realtime === "object" && viewer.realtime !== null
+    ? viewer.realtime as Record<string, unknown>
+    : {};
+  const mqtt = typeof realtime.mqtt === "object" && realtime.mqtt !== null
+    ? realtime.mqtt as Record<string, unknown>
+    : {};
+
+  return {
+    ...config,
+    viewer: {
+      ...viewer,
+      realtime: {
+        ...realtime,
+        mqtt: {
+          ...mqtt,
+          url: realtimeMqttUrl,
+        },
+      },
+    },
+  };
+}
+
 export async function loadConfig(configDir = defaultConfigDir()): Promise<AppConfig> {
   const [server, devices, extractors] = await Promise.all([
     readYamlFile(path.join(configDir, "server.yaml")),
@@ -57,11 +88,11 @@ export async function loadConfig(configDir = defaultConfigDir()): Promise<AppCon
     readYamlFile(path.join(configDir, "extractors.yaml")),
   ]);
 
-  return appConfigSchema.parse({
+  return appConfigSchema.parse(withEnvironmentOverrides({
     ...(server as object),
     ...(devices as object),
     ...(extractors as object),
-  });
+  }));
 }
 
 export async function loadReceiverConfig(configDir = defaultConfigDir()): Promise<ReceiverConfig> {
@@ -70,8 +101,8 @@ export async function loadReceiverConfig(configDir = defaultConfigDir()): Promis
     readYamlFile(path.join(configDir, "devices.yaml")),
   ]);
 
-  return receiverConfigSchema.parse({
+  return receiverConfigSchema.parse(withEnvironmentOverrides({
     ...(server as object),
     ...(devices as object),
-  });
+  }));
 }

@@ -169,7 +169,27 @@ npm run start:receiver
 npm run start:viewer
 ```
 
-Dockerで起動する場合:
+Docker Composeで起動する場合:
+
+```bash
+docker compose up -d --build
+```
+
+Composeでは `receiver` と `viewer` を別コンテナとして起動します。両方とも同じイメージを使いますが、起動コマンドを分けています。viewerコンテナは `IOT_DATA_SERVER_VIEWER_MQTT_URL=mqtt://receiver:1883` でreceiverコンテナのMQTTブローカを購読します。
+
+viewerだけを更新する場合:
+
+```bash
+docker compose up -d --no-deps --build viewer
+```
+
+receiverだけを更新する場合:
+
+```bash
+docker compose up -d --no-deps --build receiver
+```
+
+単一コンテナで簡易起動する場合:
 
 ```bash
 docker build -t iot-data-server:1.1.0 .
@@ -188,6 +208,12 @@ docker run --rm \
 IOT_DATA_SERVER_CONFIG_DIR=/etc/iot-data-server \
 IOT_DATA_SERVER_DATA_DIR=/var/lib/iot-data-server/data \
 npm run start:receiver
+```
+
+viewerのMQTT接続先だけは環境変数で上書きできます。Docker Composeのようにreceiverとviewerが別コンテナになる場合に使います。
+
+```bash
+IOT_DATA_SERVER_VIEWER_MQTT_URL=mqtt://receiver:1883 npm run start:viewer
 ```
 
 ## 動作確認
@@ -337,7 +363,7 @@ location /iot-data/ {
 
 ## デプロイ方針
 
-初期運用では、receiverとviewerを別々のsystemd serviceとして起動する想定です。
+初期運用では、Docker Composeでreceiverとviewerを別コンテナとして起動するか、receiverとviewerを別々のsystemd serviceとして起動する想定です。
 
 配置例:
 
@@ -350,6 +376,12 @@ location /iot-data/ {
 ```
 
 通常のUI更新ではreceiverは再起動せず、viewerだけを再起動します。
+
+```bash
+docker compose up -d --no-deps --build viewer
+```
+
+systemdで運用している場合:
 
 ```bash
 sudo systemctl restart iot-data-viewer

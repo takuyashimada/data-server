@@ -1,0 +1,32 @@
+services:
+  receiver:
+    build: .
+    image: iot-data-server:local
+    command: ["node", "packages/receiver/dist/main.js"]
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "8883:8883"
+    environment:
+      IOT_DATA_SERVER_CONFIG_DIR: /app/config
+      IOT_DATA_SERVER_DATA_DIR: /app/data
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data
+
+  viewer:
+    build: .
+    image: iot-data-server:local
+    command: ["node", "packages/viewer/dist/main.js"]
+    restart: unless-stopped
+    depends_on:
+      - receiver
+    ports:
+      - "3000:3000"
+    environment:
+      IOT_DATA_SERVER_CONFIG_DIR: /app/config
+      IOT_DATA_SERVER_DATA_DIR: /app/data
+      IOT_DATA_SERVER_VIEWER_MQTT_URL: mqtt://receiver:1883
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data:ro
