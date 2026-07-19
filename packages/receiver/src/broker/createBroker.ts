@@ -3,6 +3,8 @@ import { createRequire } from "node:module";
 import {
   canDevicePublish,
   createLogger,
+  extractMeasuredAt,
+  findEnabledLabel,
   findDevice,
   isViewerClient,
   parseDataTopic,
@@ -137,8 +139,11 @@ export async function createBroker(configRef: MutableConfig, writer: JsonlWriter
     const receivedAt = new Date().toISOString();
     try {
       const data = parsePayload(packet.payload);
+      const labelConfig = findEnabledLabel(configRef.get(), parsed.device, parsed.label);
+      const measuredAt = labelConfig ? extractMeasuredAt(data, labelConfig) : undefined;
       void writer.append({
         receivedAt,
+        ...(measuredAt ? { measuredAt } : {}),
         device: parsed.device,
         label: parsed.label,
         topic: packet.topic,

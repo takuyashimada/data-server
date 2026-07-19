@@ -87,10 +87,13 @@ devices:
     labels:
       - name: "environment"
         enabled: true
+        timestamp: "measuredAt"
         readonlyView:
           enabled: true
           token: "readonly-token"
 ```
+
+`timestamp` を指定すると、受信JSONオブジェクトのトップレベルにある該当フィールドを測定時刻として扱います。値はms単位のUNIX時刻です。保存レコードには受信時刻 `receivedAt` と測定時刻 `measuredAt` の両方が入り、日次ファイル、グラフ表示、履歴範囲指定、周波数フィルターは `measuredAt` を優先します。`timestamp` が未指定、またはpayloadがJSONオブジェクトでない場合は従来通り `receivedAt` を使います。
 
 開発中は `token` を使えます。本番では `tokenHash` の利用を推奨します。
 
@@ -159,6 +162,19 @@ npm run start:receiver
 
 ```bash
 npm run start:viewer
+```
+
+Dockerで起動する場合:
+
+```bash
+docker build -t iot-data-server:1.1.0 .
+docker run --rm \
+  -p 1883:1883 \
+  -p 8883:8883 \
+  -p 3000:3000 \
+  -v "$PWD/config:/app/config:ro" \
+  -v "$PWD/data:/app/data" \
+  iot-data-server:1.1.0
 ```
 
 環境変数で設定ディレクトリとデータディレクトリを指定できます。

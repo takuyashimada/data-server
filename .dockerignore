@@ -1,0 +1,11 @@
+.git
+node_modules
+packages/*/dist
+packages/*/tsconfig.tsbuildinfo
+data/*
+!data/.gitkeep
+config/*.yaml
+!config/*.example.yaml
+.agents
+.codex
+npm-debug.log*

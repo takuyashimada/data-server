@@ -5,6 +5,7 @@ devices:
     labels:
       - name: "environment"
         enabled: true
+        timestamp: "measuredAt"
         readonlyView:
           enabled: true
           token: "readonly-token"

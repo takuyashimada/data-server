@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { access } from "node:fs/promises";
 import { createInterface } from "node:readline";
-import { deviceLabelDataFile, StoredRecord } from "@iot-data-server/shared";
+import { deviceLabelDataFile, recordTime, StoredRecord } from "@iot-data-server/shared";
 
 function datesBetween(from: Date, to: Date): Date[] {
   const dates: Date[] = [];
@@ -44,8 +44,8 @@ export async function readRecords(
       }
 
       const record = JSON.parse(line) as StoredRecord;
-      const receivedAt = new Date(record.receivedAt);
-      if (receivedAt >= from && receivedAt <= to) {
+      const time = recordTime(record);
+      if (time >= from && time <= to) {
         records.push(record);
       }
     }

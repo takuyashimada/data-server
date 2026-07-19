@@ -185,7 +185,11 @@ export const readonlyClientScript = `(() => {
   }
 
   function recordTime(record) {
-    return new Date(record.receivedAt).getTime();
+    return new Date(record.measuredAt ?? record.receivedAt).getTime();
+  }
+
+  function recordTimeText(record) {
+    return record.measuredAt ?? record.receivedAt;
   }
 
   function fmt(value) {
@@ -337,7 +341,7 @@ export const readonlyClientScript = `(() => {
       chronologicalRows.push(row);
       row.pointValues.forEach((value, index) => {
         if (value !== null) {
-          seriesPoints[index].points.push({ t: record.receivedAt, v: value });
+          seriesPoints[index].points.push({ t: recordTime(record), v: value });
         }
       });
     }
@@ -438,19 +442,19 @@ export const readonlyClientScript = `(() => {
     els.recordsUnit.textContent = unitLabels.length === 1 ? "(" + unitLabels[0] + ")" : "";
 
     if (!series.length) {
-      els.recordsHead.innerHTML = '<tr><th style="width: 220px;">receivedAt</th><th>data</th></tr>';
+      els.recordsHead.innerHTML = '<tr><th style="width: 220px;">time</th><th>data</th></tr>';
       els.records.innerHTML = visibleRows().slice(0, 200).map((row) => (
-        "<tr><td>" + escapeHtml(row.record.receivedAt) + '</td><td class="mono">' + escapeHtml(JSON.stringify(row.record.data, null, 2)) + "</td></tr>"
+        "<tr><td>" + escapeHtml(recordTimeText(row.record)) + '</td><td class="mono">' + escapeHtml(JSON.stringify(row.record.data, null, 2)) + "</td></tr>"
       )).join("");
       return;
     }
 
-    els.recordsHead.innerHTML = '<tr><th style="width: 220px;">receivedAt</th>' + series.map((item) => (
+    els.recordsHead.innerHTML = '<tr><th style="width: 220px;">time</th>' + series.map((item) => (
       '<th><span class="swatch" style="background:' + escapeHtml(item.color) + '"></span>' + escapeHtml(item.label + unitSuffix(item.unit)) + '</th>'
     )).join("") + '</tr>';
 
     els.records.innerHTML = visibleRows().slice(0, 200).map((row) => (
-      "<tr><td>" + escapeHtml(row.record.receivedAt) + "</td>" + series.map((_item, index) => (
+      "<tr><td>" + escapeHtml(recordTimeText(row.record)) + "</td>" + series.map((_item, index) => (
         '<td class="mono">' + escapeHtml(fmt(row.values[index])) + "</td>"
       )).join("") + "</tr>"
     )).join("");
@@ -693,7 +697,7 @@ export const readonlyClientScript = `(() => {
         evaluatedRows = evaluatedRows.slice(0, 10000);
         row.pointValues.forEach((value, index) => {
           if (value !== null && seriesPoints[index]) {
-            seriesPoints[index].points.push({ t: record.receivedAt, v: value });
+            seriesPoints[index].points.push({ t: recordTime(record), v: value });
             seriesPoints[index].points = seriesPoints[index].points.slice(-10000);
           }
         });

@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import mqtt, { MqttClient } from "mqtt";
-import { AppConfig, parseDataTopic, StoredRecord } from "@iot-data-server/shared";
+import { AppConfig, extractMeasuredAt, findEnabledLabel, parseDataTopic, StoredRecord } from "@iot-data-server/shared";
 
 export class RealtimeSubscriber extends EventEmitter {
   private client: MqttClient | null = null;
@@ -24,12 +24,16 @@ export class RealtimeSubscriber extends EventEmitter {
       }
 
       try {
+        const data = JSON.parse(payload.toString("utf8"));
+        const labelConfig = findEnabledLabel(config, parsed.device, parsed.label);
+        const measuredAt = labelConfig ? extractMeasuredAt(data, labelConfig) : undefined;
         const record: StoredRecord = {
           receivedAt: new Date().toISOString(),
+          ...(measuredAt ? { measuredAt } : {}),
           device: parsed.device,
           label: parsed.label,
           topic,
-          data: JSON.parse(payload.toString("utf8")),
+          data,
         };
         this.emit("record", record);
       } catch {

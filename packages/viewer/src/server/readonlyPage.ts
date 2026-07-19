@@ -402,7 +402,7 @@ export function readonlyPage(device: string, label: string, token: string): stri
         <h2>Recent Records <span id="recordsUnit" class="unit"></span></h2>
         <div class="records">
           <table>
-            <thead id="recordsHead"><tr><th style="width: 220px;">receivedAt</th><th>data</th></tr></thead>
+            <thead id="recordsHead"><tr><th style="width: 220px;">time</th><th>data</th></tr></thead>
             <tbody id="records"></tbody>
           </table>
         </div>

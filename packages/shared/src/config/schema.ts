@@ -66,6 +66,7 @@ export const serverConfigSchema = z.object({
 export const labelConfigSchema = z.object({
   name: nameSchema,
   enabled: z.boolean().default(true),
+  timestamp: z.string().min(1).optional(),
   readonlyView: z.object({
     enabled: z.boolean().default(false),
   }).merge(optionalSecretSchema).default({ enabled: false }),
